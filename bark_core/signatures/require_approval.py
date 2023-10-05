@@ -14,17 +14,23 @@
 
 from gitbark.git import Commit
 from gitbark.rule import Rule
+from gitbark.util import cmd
+from gitbark.cli.util import CliFail
 
 from .util import Pubkey, get_authorized_pubkeys
 
+from pygit2 import Repository, Blob
 import re
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class RequireApproval(Rule):
     def validate(self, commit: Commit) -> bool:
         authorized_keys_pattern, threshold = (
             self.args["authorized_keys"],
-            self.args["threshold"],
+            int(self.args["threshold"]),
         )
         threshold = int(threshold)
         authorized_pubkeys = get_authorized_pubkeys(
@@ -34,6 +40,29 @@ class RequireApproval(Rule):
         passes_rule, violation = require_approval(commit, threshold, authorized_pubkeys)
         self.add_violation(violation)
         return passes_rule
+    
+    def prepare_merge_msg(self, commit_msg_file: str) -> None:
+        threshold = int(self.args["threshold"])
+
+        merge_head = Commit(
+            self.repo.references["MERGE_HEAD"].resolve().target
+        )
+        approvals = get_approvals_detached(merge_head, self.repo)
+        if len(approvals) < threshold:
+            raise CliFail(
+                f"Found {len(approvals)} approvals for {merge_head.hash} "
+                f"but expected {threshold}."
+            )
+        
+        with open(commit_msg_file, 'a') as f:
+            f.writelines([
+                "\n",
+                "\n",
+                f"Including commit: {merge_head.hash}",
+                "Approvals:"
+            ])
+            for approval in approvals:
+                f.write(approval + "\n")
 
 
 def require_approval(commit: Commit, threshold: int, authorized_pubkeys: list[Pubkey]):
@@ -55,7 +84,7 @@ def require_approval(commit: Commit, threshold: int, authorized_pubkeys: list[Pu
     # The merge head
     require_approval_for = parents[-1]
 
-    signatures = get_approvals(commit)
+    signatures = get_approvals_in_commit(commit)
 
     valid_approvals = 0
     approvers = set()
@@ -81,7 +110,7 @@ def require_approval(commit: Commit, threshold: int, authorized_pubkeys: list[Pu
     return True, violation
 
 
-def get_approvals(commit: Commit):
+def get_approvals_in_commit(commit: Commit):
     commit_msg = commit.get_commit_message()
 
     pattern = re.compile(
@@ -93,3 +122,23 @@ def get_approvals(commit: Commit):
         signature_blobs.append(match.group(0))
 
     return signature_blobs
+
+def get_approvals_detached(commit: Commit, repo: Repository) -> list[str]:
+    try:
+        cmd("git", "origin", "fetch", "refs/signatures/*:refs/signatures/*")
+    except Exception:
+        logger.warn("Failed to fetch from 'refs/signatures'")
+
+    references = repo.references.iterator()
+    approvals = []
+    for ref in references:
+        if re.match(f"refs/signatures/{commit.hash}/*", ref.name):
+            object = repo.get(ref.target)
+            if isinstance(object, Blob):
+                approvals.append(object.data.decode())
+    return approvals
+
+
+        
+
+
