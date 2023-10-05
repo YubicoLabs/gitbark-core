@@ -58,8 +58,8 @@ class RequireApproval(Rule):
             f.writelines([
                 "\n",
                 "\n",
-                f"Including commit: {merge_head.hash}",
-                "Approvals:"
+                f"Including commit: {merge_head.hash}\n",
+                "Approvals:\n"
             ])
             for approval in approvals:
                 f.write(approval + "\n")
@@ -125,7 +125,7 @@ def get_approvals_in_commit(commit: Commit):
 
 def get_approvals_detached(commit: Commit, repo: Repository) -> list[str]:
     try:
-        cmd("git", "origin", "fetch", "refs/signatures/*:refs/signatures/*")
+        cmd("git", "fetch", "origin", "refs/signatures/*:refs/signatures/*")
     except Exception:
         logger.warn("Failed to fetch from 'refs/signatures'")
 
