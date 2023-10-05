@@ -40,27 +40,22 @@ class RequireApproval(Rule):
         passes_rule, violation = require_approval(commit, threshold, authorized_pubkeys)
         self.add_violation(violation)
         return passes_rule
-    
+
     def prepare_merge_msg(self, commit_msg_file: str) -> None:
         threshold = int(self.args["threshold"])
 
-        merge_head = Commit(
-            self.repo.references["MERGE_HEAD"].resolve().target
-        )
+        merge_head = Commit(self.repo.references["MERGE_HEAD"].resolve().target)
         approvals = get_approvals_detached(merge_head, self.repo)
         if len(approvals) < threshold:
             raise CliFail(
                 f"Found {len(approvals)} approvals for {merge_head.hash} "
                 f"but expected {threshold}."
             )
-        
-        with open(commit_msg_file, 'a') as f:
-            f.writelines([
-                "\n",
-                "\n",
-                f"Including commit: {merge_head.hash}\n",
-                "Approvals:\n"
-            ])
+
+        with open(commit_msg_file, "a") as f:
+            f.writelines(
+                ["\n", "\n", f"Including commit: {merge_head.hash}\n", "Approvals:\n"]
+            )
             for approval in approvals:
                 f.write(approval + "\n")
 
@@ -123,6 +118,7 @@ def get_approvals_in_commit(commit: Commit):
 
     return signature_blobs
 
+
 def get_approvals_detached(commit: Commit, repo: Repository) -> list[str]:
     try:
         cmd("git", "fetch", "origin", "refs/signatures/*:refs/signatures/*")
@@ -137,8 +133,3 @@ def get_approvals_detached(commit: Commit, repo: Repository) -> list[str]:
             if isinstance(object, Blob):
                 approvals.append(object.data.decode())
     return approvals
-
-
-        
-
-

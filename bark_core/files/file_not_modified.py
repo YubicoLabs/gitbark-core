@@ -29,7 +29,11 @@ class FileNotModified(Rule):
         return passes_rule
 
 
-def validate_file_not_modified(commit: Commit, validator: Commit, pattern: str):
+def validate_file_not_modified(
+    commit: Commit,
+    validator: Commit,
+    pattern: str,
+):
     files_modified = commit.get_files_modified(validator)
     file_matches = list(filter(lambda f: re.match(pattern, f), files_modified))
 

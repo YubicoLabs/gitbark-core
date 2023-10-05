@@ -1,5 +1,5 @@
 name: Bark core module
-description: Core Bark rules
+description: Core Bark rules and commands
 min_version: 0.0.1
 rules:
   - id: require_signature
@@ -18,9 +18,6 @@ rules:
     description: Prevents modification to speicific files.
     entrypoint: gitbark.bark_core.files.file_not_modified
 subcommands:
-  - name: add-approvals
-    description: Add approvals in merge commit message.
-    entrypoint: bark_core.signatures.commands.add_approvals_cmd:add_approvals
   - name: approve
     description: Add your signature to a commit.
     entrypoint: bark_core.signatures.commands.approve_cmd:approve
