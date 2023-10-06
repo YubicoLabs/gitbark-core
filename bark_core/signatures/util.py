@@ -3,7 +3,9 @@ from gitbark.git import Commit
 from pgpy import PGPKey, PGPSignature
 from paramiko import PKey
 from typing import Any, Union
+from pygit2 import Repository
 
+import re
 import warnings
 
 warnings.filterwarnings("ignore")
@@ -56,7 +58,12 @@ def verify_signature_bulk(pubkeys: list[Pubkey], signature: Any, subject: Any) -
 
     return False
 
+def get_authorized_pubkeys(validator: Commit, authorized_keys_pattern: str, repo: Repository):
+    pubkey_entries = repo.revparse_single(f"{validator.hash}:.gitbark/.pubkeys")
+    authorized_pubkey_blobs = []
+    for obj in pubkey_entries:
+        if re.search(authorized_keys_pattern, obj.name):
+            pubkey = repo.get(obj.id).read_raw().decode().strip()
+            authorized_pubkey_blobs.append(pubkey)
 
-def get_authorized_pubkeys(validator: Commit, authorized_keys_pattern: str):
-    authorized_pubkey_blobs = validator.get_public_keys(authorized_keys_pattern)
     return [Pubkey(blob) for blob in authorized_pubkey_blobs]

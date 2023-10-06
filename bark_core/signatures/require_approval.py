@@ -34,7 +34,7 @@ class RequireApproval(Rule):
         )
         threshold = int(threshold)
         authorized_pubkeys = get_authorized_pubkeys(
-            self.validator, authorized_keys_pattern
+            self.validator, authorized_keys_pattern, self.repo
         )
 
         passes_rule, violation = require_approval(commit, threshold, authorized_pubkeys)
@@ -68,7 +68,7 @@ def require_approval(commit: Commit, threshold: int, authorized_pubkeys: list[Pu
     Note: The second parent of a merge request will always be the parent
     of the merged branch.
     """
-    parents = commit.get_parents()
+    parents = commit.parents
     violation = ""
 
     if len(parents) <= 1:
@@ -88,7 +88,7 @@ def require_approval(commit: Commit, threshold: int, authorized_pubkeys: list[Pu
         for pubkey in authorized_pubkeys:
             if (
                 pubkey.verify_signature(
-                    signature, require_approval_for.get_commit_object()
+                    signature, require_approval_for.object
                 )
                 and pubkey.fingerprint not in approvers
             ):
@@ -106,7 +106,7 @@ def require_approval(commit: Commit, threshold: int, authorized_pubkeys: list[Pu
 
 
 def get_approvals_in_commit(commit: Commit):
-    commit_msg = commit.get_commit_message()
+    commit_msg = commit.message
 
     pattern = re.compile(
         r"-----BEGIN (PGP|SSH) SIGNATURE-----(.*?)-----END (PGP|SSH) SIGNATURE-----",

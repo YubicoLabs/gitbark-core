@@ -22,7 +22,7 @@ class RequireSignature(Rule):
     def validate(self, commit: Commit) -> bool:
         authorized_keys_pattern = self.args["authorized_keys"]
         authorized_pubkeys = get_authorized_pubkeys(
-            self.validator, authorized_keys_pattern
+            self.validator, authorized_keys_pattern, self.repo
         )
 
         passes_rule, violation = require_signature(commit, authorized_pubkeys)
@@ -31,7 +31,7 @@ class RequireSignature(Rule):
 
 
 def require_signature(commit: Commit, authorized_pubkeys: list[Pubkey]):
-    signature, commit_object = commit.get_signature()
+    signature, commit_object = commit.signature
     violation = ""
 
     if not signature:

@@ -46,7 +46,7 @@ def validate_invalid_parents(
     if not require_explicit_inclusion:
         return True
 
-    parents = commit.get_parents()
+    parents = commit.parents
     invalid_parents = []
 
     for parent in parents:
@@ -58,7 +58,7 @@ def validate_invalid_parents(
         return True
 
     invalid_parent_hashes = [parent.hash for parent in invalid_parents]
-    commit_msg = commit.get_commit_message()
+    commit_msg = commit.message
     for hash in invalid_parent_hashes:
         if hash not in commit_msg:
             return False

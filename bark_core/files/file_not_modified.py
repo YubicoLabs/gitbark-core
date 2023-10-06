@@ -15,6 +15,7 @@
 from gitbark.git import Commit
 from gitbark.rule import Rule
 
+from pygit2 import Repository
 import re
 
 
@@ -23,7 +24,7 @@ class FileNotModified(Rule):
         pattern = self.args["pattern"]
 
         passes_rule, violation = validate_file_not_modified(
-            commit, self.validator, pattern
+            commit, self.validator, pattern, self.repo
         )
         self.add_violation(violation)
         return passes_rule
@@ -33,8 +34,9 @@ def validate_file_not_modified(
     commit: Commit,
     validator: Commit,
     pattern: str,
+    repo: Repository,
 ):
-    files_modified = commit.get_files_modified(validator)
+    files_modified = get_files_modified(commit, validator, repo)
     file_matches = list(filter(lambda f: re.match(pattern, f), files_modified))
 
     if len(file_matches) > 0:
@@ -44,3 +46,7 @@ def validate_file_not_modified(
         return False, violation
 
     return True, None
+
+def get_files_modified(commit: Commit, validator: Commit, repo: Repository):
+    diff = repo.diff(commit.hash, validator.hash)
+    return [delta.new_file.path for delta in diff.deltas]

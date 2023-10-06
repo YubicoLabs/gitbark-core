@@ -119,7 +119,7 @@ def is_hex(s):
 
 
 def sign_commit(commit: Commit, key: Key):
-    commit_obj = commit.get_commit_object()
+    commit_obj = commit.object
     if key.type == KeyType.GPG:
         gpg_process = subprocess.Popen(
             ["gpg", "-u", key.identifier, "--armor", "--detach-sign", "-"],
