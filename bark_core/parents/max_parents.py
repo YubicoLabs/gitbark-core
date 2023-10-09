@@ -17,6 +17,8 @@ from gitbark.rule import Rule
 
 
 class MaxParents(Rule):
+    """Specifies the maximum number of parents for a commit."""
+
     def validate(self, commit: Commit) -> bool:
         threshold = self.args["threshold"]
         parents = commit.parents

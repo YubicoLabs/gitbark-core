@@ -19,6 +19,8 @@ from .util import Pubkey, get_authorized_pubkeys, verify_signature_bulk
 
 
 class RequireSignature(Rule):
+    """Requires the commit to be signed."""
+
     def validate(self, commit: Commit) -> bool:
         authorized_keys_pattern = self.args["authorized_keys"]
         authorized_pubkeys = get_authorized_pubkeys(
