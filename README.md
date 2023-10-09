@@ -1,6 +1,6 @@
 # GitBark Core
 
-A collection of useful rules and subcommands for use in 
+A collection of useful rules and subcommands for use in
 [GitBark](https://github.com/YubicoLabs/gitbark).
 
 
@@ -8,9 +8,8 @@ A collection of useful rules and subcommands for use in
 To use this package in [GitBark](https://github.com/YubicoLabs/gitbark), configure your [`bark_rules.yaml`]( https://github.com/YubicoLabs/gitbark) file as follows:
 
 ```yaml
-modules: 
-    - repo: https://github.com/YubicoLabs/gitbark-core
-      rev: vX.X.X # The revision or tag to clone from
+modules:
+    - https://github.com/YubicoLabs/gitbark-core
 ```
 
 This will import the GitBark Core package into your GitBark project, allowing you to specify rule usage in [`commit_rules.yaml`](https://github.com/YubicoLabs/gitbark), and use subcommands.
@@ -38,7 +37,7 @@ This specific module exposes two rules that employs the concept of signatures to
 
 * `require_approval`
 
-  Enforce that pull requests are approved by authorized individuals. 
+  Enforce that pull requests are approved by authorized individuals.
 
   * Specify the set of authorized approvers and approval threshold with `args: [authorized_keys=<regex_pattern>, threhsold=<threshold>]`.
 
@@ -61,10 +60,10 @@ This specific module exposes two rules that employs the concept of signatures to
 This module exposes one rule that allows locking files matching a specific pattern. This rule can also be used in combination with `require_signature` to achieve file-level authorization.
 
 * `file_not_modified`
-  
+
   Enforces certain files to be unmodified.
 
-  * Specify the set of files to match with `args: [pattern=<regex_pattern>]`, where `regex_pattern` is the pattern to match the files you wish to stay unmodified. 
+  * Specify the set of files to match with `args: [pattern=<regex_pattern>]`, where `regex_pattern` is the pattern to match the files you wish to stay unmodified.
 
   * Normally this rule is used in combination with `require_signature` to achieve file-level authorization, as shown below:
 
@@ -80,13 +79,13 @@ This module exposes one rule that allows locking files matching a specific patte
     In this commit rule configuration, `file_not_modified` and `require_signature` are included in the `any` clause which means that they will be evaluated using OR logic (at least one of them needs to be satisfied). The resulting behavior stipulates that "Dockerfile" cannot be modified unless the commit is signed by Alice.
 
 ### Parents
-This module exposes two rules that set conditions for the parents of a commit. 
+This module exposes two rules that set conditions for the parents of a commit.
 
 * `invalid_parents`
-  
+
   Specify if ALL parents of a commit must be VALID (this prevents "gaps" of non-valid commits). Optionally, only allow non-valid parents if their commit hashes are included in the commit message (this makes allowing them more explicit, which prevents accidental inclusion).
 
-  * Specify that ALL parents of a commit must be valid with `args: [allow=False]`. 
+  * Specify that ALL parents of a commit must be valid with `args: [allow=False]`.
 
   * Specify that non-valid parents are allowed if their commit hashes are included in the commit message with `args: [allow=True, require_explicit_inclusion=True]`.
 
@@ -122,7 +121,7 @@ This module exposes two rules that set conditions for the parents of a commit.
   ```
 
 
-  
+
 
 
 
