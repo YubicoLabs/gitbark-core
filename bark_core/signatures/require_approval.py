@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 
 class RequireApproval(Rule):
+    """Requires merge commits to include signature approvals."""
+
     def validate(self, commit: Commit) -> bool:
         authorized_keys_pattern, threshold = (
             self.args["authorized_keys"],

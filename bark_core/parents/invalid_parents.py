@@ -18,6 +18,8 @@ from gitbark.rule import Rule
 
 
 class InvalidParents(Rule):
+    """Specifies whether non-valid parents should be allowed."""
+
     def validate(self, commit: Commit) -> bool:
         cache = self.cache
         if "allow" in self.args:

@@ -20,6 +20,8 @@ import re
 
 
 class FileNotModified(Rule):
+    """Prevents modification to specific files."""
+
     def validate(self, commit: Commit) -> bool:
         pattern = self.args["pattern"]
 
