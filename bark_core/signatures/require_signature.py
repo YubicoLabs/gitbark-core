@@ -21,10 +21,12 @@ from .util import Pubkey, get_authorized_pubkeys, verify_signature_bulk
 class RequireSignature(Rule):
     """Requires the commit to be signed."""
 
+    def _parse_args(self, args):
+        self.authorized_keys = args["authorized_keys"]
+
     def validate(self, commit: Commit) -> bool:
-        authorized_keys_pattern = self.args["authorized_keys"]
         authorized_pubkeys = get_authorized_pubkeys(
-            self.validator, authorized_keys_pattern, self.repo
+            self.validator, self.authorized_keys, self.repo
         )
 
         passes_rule, violation = require_signature(commit, authorized_pubkeys)

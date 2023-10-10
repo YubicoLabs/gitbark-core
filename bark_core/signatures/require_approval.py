@@ -29,29 +29,26 @@ logger = logging.getLogger(__name__)
 class RequireApproval(Rule):
     """Requires merge commits to include signature approvals."""
 
+    def _parse_args(self, args):
+        self.authorized_keys = args["authorized_keys"]
+        self.threshold = int(args["threshold"])
+
     def validate(self, commit: Commit) -> bool:
-        authorized_keys_pattern, threshold = (
-            self.args["authorized_keys"],
-            int(self.args["threshold"]),
-        )
-        threshold = int(threshold)
         authorized_pubkeys = get_authorized_pubkeys(
-            self.validator, authorized_keys_pattern, self.repo
+            self.validator, self.authorized_keys, self.repo
         )
 
-        passes_rule, violation = require_approval(commit, threshold, authorized_pubkeys)
+        passes_rule, violation = require_approval(commit, self.threshold, authorized_pubkeys)
         self.add_violation(violation)
         return passes_rule
 
     def prepare_merge_msg(self, commit_msg_file: str) -> None:
-        threshold = int(self.args["threshold"])
-
         merge_head = Commit(self.repo.references["MERGE_HEAD"].resolve().target)
         approvals = get_approvals_detached(merge_head, self.repo)
-        if len(approvals) < threshold:
+        if len(approvals) < self.threshold:
             raise CliFail(
                 f"Found {len(approvals)} approvals for {merge_head.hash} "
-                f"but expected {threshold}."
+                f"but expected {self.threshold}."
             )
 
         with open(commit_msg_file, "a") as f:

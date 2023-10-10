@@ -22,11 +22,12 @@ import re
 class FileNotModified(Rule):
     """Prevents modification to specific files."""
 
-    def validate(self, commit: Commit) -> bool:
-        pattern = self.args["pattern"]
+    def _parse_args(self, args):
+        self.pattern = args["pattern"]
 
+    def validate(self, commit: Commit) -> bool:
         passes_rule, violation = validate_file_not_modified(
-            commit, self.validator, pattern, self.repo
+            commit, self.validator, self.pattern, self.repo
         )
         self.add_violation(violation)
         return passes_rule

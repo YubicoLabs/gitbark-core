@@ -20,19 +20,14 @@ from gitbark.rule import Rule
 class InvalidParents(Rule):
     """Specifies whether non-valid parents should be allowed."""
 
+    def _parse_args(self, args):
+        self.allow = args.get("allow", True)
+        self.require_explicit_inclusion = args.get("require_explicit_inclusion", False)
+
     def validate(self, commit: Commit) -> bool:
         cache = self.cache
-        if "allow" in self.args:
-            allow = self.args["allow"]
-        else:
-            allow = True  # Non-valid commits are allowed per default
-        if "require_explicit_inclusion" in self.args:
-            require_explicit_inclusion = self.args["require_explicit_inclusion"]
-        else:
-            require_explicit_inclusion = False
-
         passes_rule = validate_invalid_parents(
-            commit, cache, allow, require_explicit_inclusion
+            commit, cache, self.allow, self.require_explicit_inclusion
         )
         if not passes_rule:
             self.add_violation("Commit has invalid parents")
