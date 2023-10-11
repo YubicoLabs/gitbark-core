@@ -22,11 +22,9 @@ class MaxParents(Rule):
     def _parse_args(self, args):
         self.threshold = args["threshold"]
 
-    def validate(self, commit: Commit) -> bool:
+    def validate(self, commit: Commit):
         parents = commit.parents
         if len(parents) < self.threshold:
-            self.add_violation(
+            raise RuleViolation(
                 f"Commit has {len(parents)} parent(s) but expected {self.threshold}"
             )
-            return False
-        return True

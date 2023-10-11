@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from gitbark.git import Commit
-from gitbark.rule import Rule
+from gitbark.rule import Rule, RuleViolation
 from gitbark.util import cmd
 from gitbark.cli.util import CliFail
 
@@ -33,14 +33,12 @@ class RequireApproval(Rule):
         self.authorized_keys = args["authorized_keys"]
         self.threshold = int(args["threshold"])
 
-    def validate(self, commit: Commit) -> bool:
+    def validate(self, commit: Commit):
         authorized_pubkeys = get_authorized_pubkeys(
             self.validator, self.authorized_keys, self.repo
         )
 
-        passes_rule, violation = require_approval(commit, self.threshold, authorized_pubkeys)
-        self.add_violation(violation)
-        return passes_rule
+        require_approval(commit, self.threshold, authorized_pubkeys)
 
     def prepare_merge_msg(self, commit_msg_file: str) -> None:
         merge_head = Commit(self.repo.references["MERGE_HEAD"].resolve().target)
@@ -68,12 +66,10 @@ def require_approval(commit: Commit, threshold: int, authorized_pubkeys: list[Pu
     of the merged branch.
     """
     parents = commit.parents
-    violation = ""
 
     if len(parents) <= 1:
         # Require approval can only be applied on pull requests
-        violation = "Commit does not originate from a pull request"
-        return False, violation
+        raise RuleViolation("Commit does not originate from a pull request")
 
     # The merge head
     require_approval_for = parents[-1]
@@ -86,22 +82,17 @@ def require_approval(commit: Commit, threshold: int, authorized_pubkeys: list[Pu
     for signature in signatures:
         for pubkey in authorized_pubkeys:
             if (
-                pubkey.verify_signature(
-                    signature, require_approval_for.object
-                )
+                pubkey.verify_signature(signature, require_approval_for.object)
                 and pubkey.fingerprint not in approvers
             ):
                 valid_approvals = valid_approvals + 1
                 approvers.add(pubkey.fingerprint)
 
     if valid_approvals < threshold:
-        violation = (
+        raise RuleViolation(
             f"Commit {commit.hash} has {valid_approvals} valid approvals "
             f" but expected {threshold}"
         )
-        return False, violation
-
-    return True, violation
 
 
 def get_approvals_in_commit(commit: Commit):

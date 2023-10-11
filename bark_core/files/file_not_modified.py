@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from gitbark.git import Commit
-from gitbark.rule import Rule
+from gitbark.rule import Rule, RuleViolation
 
 from pygit2 import Repository
 import re
@@ -26,11 +26,7 @@ class FileNotModified(Rule):
         self.pattern = args["pattern"]
 
     def validate(self, commit: Commit) -> bool:
-        passes_rule, violation = validate_file_not_modified(
-            commit, self.validator, self.pattern, self.repo
-        )
-        self.add_violation(violation)
-        return passes_rule
+        validate_file_not_modified(commit, self.validator, self.pattern, self.repo)
 
 
 def validate_file_not_modified(
@@ -45,10 +41,8 @@ def validate_file_not_modified(
     if len(file_matches) > 0:
         # Commit modifies locked file
         files = ", ".join(file_matches)
-        violation = f"Commit modified locked file(s): {files}"
-        return False, violation
+        raise RuleViolation(f"Commit modified locked file(s): {files}")
 
-    return True, None
 
 def get_files_modified(commit: Commit, validator: Commit, repo: Repository):
     diff = repo.diff(commit.hash, validator.hash)
