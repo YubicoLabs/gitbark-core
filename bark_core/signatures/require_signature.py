@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from gitbark.git import Commit
-from gitbark.rule import Rule
+from gitbark.rule import Rule, RuleViolation
 
 from .util import Pubkey, get_authorized_pubkeys, verify_signature_bulk
 
@@ -24,32 +24,24 @@ class RequireSignature(Rule):
     def _parse_args(self, args):
         self.authorized_keys = args["authorized_keys"]
 
-    def validate(self, commit: Commit) -> bool:
+    def validate(self, commit: Commit):
         authorized_pubkeys = get_authorized_pubkeys(
             self.validator, self.authorized_keys, self.repo
         )
 
-        passes_rule, violation = require_signature(commit, authorized_pubkeys)
-        self.add_violation(violation)
-        return passes_rule
+        require_signature(commit, authorized_pubkeys)
 
 
 def require_signature(commit: Commit, authorized_pubkeys: list[Pubkey]):
     signature, commit_object = commit.signature
-    violation = ""
 
     if not signature:
         # No signature
-        violation = "Commit was not signed"
-        return False, violation
+        raise RuleViolation("Commit was not signed")
 
     if len(authorized_pubkeys) == 0:
         # No pubkeys specified
-        violation = "No public keys registered"
-        return False, violation
+        raise RuleViolation("No public keys registered")
 
-    if verify_signature_bulk(authorized_pubkeys, signature, commit_object):
-        return True, None
-    else:
-        violation = "Commit was signed by untrusted key"
-        return False, violation
+    if not verify_signature_bulk(authorized_pubkeys, signature, commit_object):
+        raise RuleViolation("Commit was signed by untrusted key")
