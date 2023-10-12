@@ -15,7 +15,16 @@
 from gitbark.git import Commit
 from gitbark.rule import Rule, RuleViolation
 
-from .util import Pubkey, get_authorized_pubkeys, verify_signature_bulk
+from .util import (
+    Pubkey,
+    get_authorized_pubkeys,
+    verify_signature_bulk,
+    add_public_keys_interactive,
+    add_authorized_keys_interactive,
+    load_public_key_files
+)
+
+from pygit2 import Repository
 
 
 class RequireSignature(Rule):
@@ -45,3 +54,11 @@ def require_signature(commit: Commit, authorized_pubkeys: list[Pubkey]):
 
     if not verify_signature_bulk(authorized_pubkeys, signature, commit_object):
         raise RuleViolation("Commit was signed by untrusted key")
+    
+
+def init(repo: Repository) -> dict:
+    add_public_keys_interactive(repo)
+    pubkeys = load_public_key_files(name_only=True)
+    authorized_keys = add_authorized_keys_interactive(pubkeys)
+    
+    return {"require_signature": {"authorized_keys": authorized_keys}}

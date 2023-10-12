@@ -15,21 +15,18 @@
 from gitbark.git import Commit
 from gitbark.cli.util import click_prompt, CliFail, click_callback
 
-from enum import Enum
-from pygit2 import Repository
 from dataclasses import dataclass
+from enum import IntEnum
 import subprocess
-import os
 import click
 
 
-class KeyType(Enum):
+class KeyType(IntEnum):
     GPG = 1
     SSH = 2
 
-
 @dataclass
-class Key:
+class SigningKey:
     identifier: str
     type: KeyType
 
@@ -69,25 +66,36 @@ def approve(ctx, commit, gpg_key_id, ssh_key_path):
     project = ctx.obj["project"]
     repo = project.repo
 
+    key = None
+
     if not gpg_key_id and not ssh_key_path:
-        key = get_key_from_git(repo)
+        config = repo.config
+        if "gpg.format" in config and "user.signingkey" in config:
+            identifier = config["user.signingkey"]
+            type = config["gpg.format"]
+            
+            if type == "openpgp":
+                key = SigningKey(identifier, KeyType.GPG)
+            elif type == "ssh":
+                key = SigningKey(identifier, KeyType.SSH)
 
     if gpg_key_id:
-        key = Key(gpg_key_id, KeyType.GPG)
+        key = SigningKey(identifier, KeyType.GPG)
 
     if ssh_key_path:
-        key = Key(ssh_key_path, KeyType.SSH)
+        key = SigningKey(identifier, KeyType.SSH)
 
     if not key:
         identifier = click_prompt(
-            prompt="Enter key identifier (GPG key id or SSH key path)"
+            prompt="Enter key identifier"
         )
-        if is_hex(identifier):
-            key = Key(identifier, KeyType.GPG)
-        elif os.path.exists(identifier):
-            key = Key(identifier, KeyType.SSH)
-        else:
-            raise CliFail("Invalid key identifier!")
+        type = click_prompt(
+            prompt="Enter the key type (GPG or SSH)",
+            type=click.Choice(["GPG", "SSH"]),
+            show_choices=False,
+        )
+        type = KeyType.GPG if type == "GPG" else KeyType.SSH
+        key = SigningKey(identifier, type)
 
     sig, key_id = sign_commit(commit, key)
 
@@ -95,30 +103,7 @@ def approve(ctx, commit, gpg_key_id, ssh_key_path):
     repo.references.create(f"refs/signatures/{commit.hash}/{key_id}", blob_id)
 
 
-def get_key_from_git(repo: Repository):
-    config = repo.config
-    if "gpg.format" in config and "user.signingkey" in config:
-        identifier = config["user.signingkey"]
-        signature_type = config["gpg.format"]
-
-        if signature_type == "openpgp":
-            return Key(identifier, KeyType.GPG)
-        elif signature_type == "ssh":
-            return Key(identifier, KeyType.SSH)
-        else:
-            return None
-    return None
-
-
-def is_hex(s):
-    try:
-        int(s, 16)
-        return True
-    except ValueError:
-        return False
-
-
-def sign_commit(commit: Commit, key: Key):
+def sign_commit(commit: Commit, key: SigningKey):
     commit_obj = commit.object
     if key.type == KeyType.GPG:
         gpg_process = subprocess.Popen(
@@ -138,7 +123,7 @@ def sign_commit(commit: Commit, key: Key):
         return sig, get_ssh_key_id(key.identifier)
 
 
-def get_ssh_key_id(ssh_key_path):
+def get_ssh_key_id(ssh_key_path: str):
     output = subprocess.check_output(
         ["ssh-keygen", "-l", "-f", ssh_key_path], text=True
     ).rstrip()
