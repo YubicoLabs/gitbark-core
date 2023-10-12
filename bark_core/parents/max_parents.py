@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from gitbark.git import Commit
-from gitbark.rule import Rule
+from gitbark.rule import Rule, RuleViolation
 
 
 class MaxParents(Rule):
