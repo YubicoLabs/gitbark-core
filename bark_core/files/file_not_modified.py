@@ -14,10 +14,9 @@
 
 from gitbark.git import Commit
 from gitbark.rule import Rule, RuleViolation
+from gitbark.cli.util import click_prompt
 
 from typing import Union
-import re
-
 
 class FileNotModified(Rule):
     """Prevents modification to specific files."""
@@ -42,3 +41,10 @@ def validate_file_not_modified(
         # Commit modifies locked file
         files = ", ".join(file_matches)
         raise RuleViolation(f"Commit modified locked file(s): {files}")
+
+def setup():
+    pattern = click_prompt(
+        prompt="Enter the pattern for the files you wish to remain unmodified"
+    )
+    return {"file_not_modified": {"pattern": pattern}}
+

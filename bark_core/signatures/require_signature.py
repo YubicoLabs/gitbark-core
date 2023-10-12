@@ -14,6 +14,7 @@
 
 from gitbark.git import Commit
 from gitbark.rule import Rule, RuleViolation
+from gitbark.cli.util import get_root
 
 from .util import (
     Pubkey,
@@ -56,7 +57,8 @@ def require_signature(commit: Commit, authorized_pubkeys: list[Pubkey]):
         raise RuleViolation("Commit was signed by untrusted key")
     
 
-def init(repo: Repository) -> dict:
+def setup() -> dict:
+    repo = Repository(get_root())
     add_public_keys_interactive(repo)
     pubkeys = load_public_key_files(name_only=True)
     authorized_keys = add_authorized_keys_interactive(pubkeys)
