@@ -35,7 +35,7 @@ class RequireApproval(Rule):
 
     def validate(self, commit: Commit):
         authorized_pubkeys = get_authorized_pubkeys(
-            self.validator, self.authorized_keys, self.repo
+            self.validator, self.authorized_keys
         )
 
         require_approval(commit, self.threshold, authorized_pubkeys)

@@ -15,7 +15,7 @@
 from gitbark.git import Commit
 from gitbark.rule import Rule, RuleViolation
 
-from pygit2 import Repository
+from typing import Union
 import re
 
 
@@ -26,24 +26,19 @@ class FileNotModified(Rule):
         self.pattern = args["pattern"]
 
     def validate(self, commit: Commit) -> bool:
-        validate_file_not_modified(commit, self.validator, self.pattern, self.repo)
+        validate_file_not_modified(commit, self.validator, self.pattern)
 
 
 def validate_file_not_modified(
     commit: Commit,
     validator: Commit,
-    pattern: str,
-    repo: Repository,
+    patterns: Union[list[str], str],
 ):
-    files_modified = get_files_modified(commit, validator, repo)
-    file_matches = list(filter(lambda f: re.match(pattern, f), files_modified))
+    locked_files = commit.list_files(patterns)
+    files_modified = validator.get_files_modified(commit)
+    file_matches = locked_files.intersection(files_modified)
 
-    if len(file_matches) > 0:
+    if file_matches:
         # Commit modifies locked file
         files = ", ".join(file_matches)
         raise RuleViolation(f"Commit modified locked file(s): {files}")
-
-
-def get_files_modified(commit: Commit, validator: Commit, repo: Repository):
-    diff = repo.diff(commit.hash, validator.hash)
-    return [delta.new_file.path for delta in diff.deltas]
