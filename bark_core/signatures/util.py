@@ -80,9 +80,14 @@ class Pubkey:
                 return False
         except Exception:
             return False
+    
+    def __eq__(self, other: object) -> bool:
+        if isinstance(other, Pubkey):
+            return other.fingerprint == self.fingerprint
+        return False
         
     def __hash__(self) -> int:
-        return int(self.fingerprint, base=16)
+        return hash(self.fingerprint)
 
 
 def verify_signature_bulk(pubkeys: list[Pubkey], signature: Any, subject: Any) -> bool:
