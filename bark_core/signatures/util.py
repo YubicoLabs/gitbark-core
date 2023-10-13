@@ -17,7 +17,7 @@ warnings.filterwarnings("ignore")
 
 
 class Pubkey:
-    def __init__(self, pubkey: str) -> None:
+    def __init__(self, pubkey: bytes) -> None:
         self.bytes = pubkey
         self.key, self.fingerprint = self._parse_pubkey(pubkey)
 

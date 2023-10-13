@@ -70,9 +70,9 @@ def approve(ctx, commit, gpg_key_id, ssh_key_path):
 
     if not gpg_key_id and not ssh_key_path:
         config = repo.config
-        if "gpg.format" in config and "user.signingkey" in config:
+        if "user.signingkey" in config:
             identifier = config["user.signingkey"]
-            type = config["gpg.format"]
+            type = config["gpg.format"] if "gpg.format" in config else "openpgp"
             
             if type == "openpgp":
                 key = SigningKey(identifier, KeyType.GPG)
