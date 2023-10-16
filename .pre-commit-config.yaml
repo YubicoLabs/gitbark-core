@@ -13,4 +13,3 @@ repos:
   hooks:
     - id: mypy
       exclude: ^(tests/|docs/)  # keep in sync with mypy.ini
-      additional_dependencies: [types-paramiko]

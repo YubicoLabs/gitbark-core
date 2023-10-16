@@ -50,7 +50,7 @@ class Pubkey:
         except Exception:
             pass
         try:
-            key = PKey(data=pubkey.decode())
+            key = PKey(data=pubkey)
             fingerprint = key.fingerprint.split(":")[1]
             return key, fingerprint
         except Exception:
