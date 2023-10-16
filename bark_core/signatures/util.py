@@ -1,4 +1,4 @@
-from gitbark.git import Commit
+from gitbark.git import Commit, BARK_CONFIG
 
 from pgpy import PGPKey, PGPSignature
 from paramiko import PKey
@@ -60,6 +60,6 @@ def verify_signature_bulk(pubkeys: list[Pubkey], signature: Any, subject: Any) -
 def get_authorized_pubkeys(
     validator: Commit, authorized_keys_patterns: Union[list[str], str]
 ):
-    files = validator.list_files(authorized_keys_patterns, ".gitbark/.pubkeys")
+    files = validator.list_files(authorized_keys_patterns, f"{BARK_CONFIG}/pubkeys")
     blobs = [validator.read_file(f) for f in files]
     return [Pubkey(blob) for blob in blobs]
