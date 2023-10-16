@@ -15,9 +15,16 @@
 from gitbark.git import Commit
 from gitbark.rule import Rule, RuleViolation
 from gitbark.util import cmd
-from gitbark.cli.util import CliFail
+from gitbark.cli.util import CliFail, get_root
 
-from .util import Pubkey, get_authorized_pubkeys
+from .util import (
+    Pubkey, 
+    get_authorized_pubkeys,
+    add_public_keys_interactive,
+    add_authorized_keys_interactive,
+    load_public_key_files,
+    click_prompt
+)
 
 from pygit2 import Repository, Blob
 import re
@@ -123,3 +130,17 @@ def get_approvals_detached(commit: Commit, repo: Repository) -> list[str]:
             if isinstance(object, Blob):
                 approvals.append(object.data.decode())
     return approvals
+
+def setup() -> dict:
+    repo = Repository(get_root())
+    add_public_keys_interactive(repo)
+    pubkeys = load_public_key_files(name_only=True)
+    authorized_keys = add_authorized_keys_interactive(pubkeys)
+    threshold = click_prompt(
+        "Enter the approval threshold",
+        type=int
+    )
+
+    return {"require_approval": {"authorized_keys": authorized_keys, "threshold": threshold}}
+
+
