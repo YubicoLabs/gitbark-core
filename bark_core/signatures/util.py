@@ -1,6 +1,7 @@
 from gitbark.git import Commit, BARK_CONFIG
 from gitbark.cli.util import get_root, click_prompt
 from gitbark.util import cmd
+from gitbark.core import BARK_CONFIG
 
 from pgpy import PGPKey, PGPSignature
 from paramiko import PKey
@@ -114,7 +115,7 @@ def get_pubkey_from_git(repo: Repository) -> Optional[Pubkey]:
 
 def load_public_key_files(name_only: bool = False) -> list[str]:
     toplevel = get_root()
-    pubkeys_folder = os.path.join(toplevel, ".gitbark", ".pubkeys")
+    pubkeys_folder = os.path.join(toplevel, BARK_CONFIG, "pubkeys")
     if os.path.exists(pubkeys_folder):
         if name_only:
             return os.listdir(pubkeys_folder)
@@ -130,7 +131,7 @@ def load_public_keys() -> set[Pubkey]:
     return pubkeys
 
 def _add_public_key_to_repo(pubkey: Pubkey, file_name:str) -> None:
-    pubkeys_folder = os.path.join(get_root(), ".gitbark", ".pubkeys")
+    pubkeys_folder = os.path.join(get_root(), BARK_CONFIG, "pubkeys")
     if not os.path.exists(pubkeys_folder):
         os.makedirs(pubkeys_folder)
 
