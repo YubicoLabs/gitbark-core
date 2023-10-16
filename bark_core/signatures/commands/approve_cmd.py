@@ -25,6 +25,7 @@ class KeyType(IntEnum):
     GPG = 1
     SSH = 2
 
+
 @dataclass
 class SigningKey:
     identifier: str
@@ -73,7 +74,7 @@ def approve(ctx, commit, gpg_key_id, ssh_key_path):
         if "user.signingkey" in config:
             identifier = config["user.signingkey"]
             type = config["gpg.format"] if "gpg.format" in config else "openpgp"
-            
+
             if type == "openpgp":
                 key = SigningKey(identifier, KeyType.GPG)
             elif type == "ssh":
@@ -86,9 +87,7 @@ def approve(ctx, commit, gpg_key_id, ssh_key_path):
         key = SigningKey(identifier, KeyType.SSH)
 
     if not key:
-        identifier = click_prompt(
-            prompt="Enter key identifier"
-        )
+        identifier = click_prompt(prompt="Enter key identifier")
         type = click_prompt(
             prompt="Enter the key type (GPG or SSH)",
             type=click.Choice(["GPG", "SSH"]),
