@@ -1,15 +1,13 @@
 from gitbark.git import Commit, BARK_CONFIG
 from gitbark.cli.util import get_root, click_prompt
 from gitbark.util import cmd
-from gitbark.core import BARK_CONFIG
 
 from pgpy import PGPKey, PGPSignature
 from paramiko import PKey
-from typing import Any, Union, Optional
+from typing import Any, Union, Optional, Tuple
 from pygit2 import Repository
 
 import subprocess
-import re
 import warnings
 import os
 import click
@@ -32,12 +30,7 @@ class Pubkey:
     @classmethod
     def parse(cls, identifier: str) -> "Pubkey":
         try:
-            pubkey = subprocess.check_output([
-                "gpg",
-                "--armor",
-                "--export",
-                identifier
-            ])
+            pubkey = subprocess.check_output(["gpg", "--armor", "--export", identifier])
             return cls(pubkey=pubkey)
         except Exception:
             pass
@@ -49,7 +42,7 @@ class Pubkey:
             pass
         raise
 
-    def _parse_pubkey(self, pubkey: str) -> Union[PGPKey, PKey]:
+    def _parse_pubkey(self, pubkey: bytes) -> Tuple[Union[PGPKey, PKey], str]:
         try:
             key, _ = PGPKey.from_blob(pubkey)
             fingerprint = str(key.fingerprint)
@@ -59,20 +52,23 @@ class Pubkey:
         try:
             key = PKey(data=pubkey)
             fingerprint = key.fingerprint.split(":")[1]
+            return key, fingerprint
         except Exception:
             pass
         raise ValueError("Could not parse public key!")
-    
+
     def verify_signature(self, signature, subject) -> bool:
         if isinstance(self.key, PGPKey):
             return self._verify_pgp_signature(self.key, signature, subject)
         else:
             return self._verify_ssh_signature(self.key, signature, subject)
-    
+
     def _verify_ssh_signature(self, pubkey: PKey, signature: Any, subject: Any) -> bool:
         return pubkey.verify_ssh_sig(subject, signature)
-    
-    def _verify_pgp_signature(self, pubkey: PGPKey, signature: Any, subject: Any) -> bool:
+
+    def _verify_pgp_signature(
+        self, pubkey: PGPKey, signature: Any, subject: Any
+    ) -> bool:
         signature = PGPSignature().from_blob(signature)
         try:
             if pubkey.verify(subject, signature):
@@ -81,12 +77,12 @@ class Pubkey:
                 return False
         except Exception:
             return False
-    
+
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Pubkey):
             return other.fingerprint == self.fingerprint
         return False
-        
+
     def __hash__(self) -> int:
         return hash(self.fingerprint)
 
@@ -101,10 +97,11 @@ def verify_signature_bulk(pubkeys: list[Pubkey], signature: Any, subject: Any) -
 
 def get_authorized_pubkeys(
     validator: Commit, authorized_keys_patterns: Union[list[str], str]
-):
+) -> list[Pubkey]:
     files = validator.list_files(authorized_keys_patterns, f"{BARK_CONFIG}/pubkeys")
     blobs = [validator.read_file(f) for f in files]
     return [Pubkey(blob) for blob in blobs]
+
 
 def get_pubkey_from_git(repo: Repository) -> Optional[Pubkey]:
     config = repo.config
@@ -112,6 +109,7 @@ def get_pubkey_from_git(repo: Repository) -> Optional[Pubkey]:
         identifier = config["user.signingkey"]
         return Pubkey.parse(identifier)
     return None
+
 
 def load_public_key_files(name_only: bool = False) -> list[str]:
     toplevel = get_root()
@@ -123,14 +121,16 @@ def load_public_key_files(name_only: bool = False) -> list[str]:
             return [f"{pubkeys_folder}/{file}" for file in os.listdir(pubkeys_folder)]
     return []
 
+
 def load_public_keys() -> set[Pubkey]:
     pubkeys = set()
     for pubkey_file in load_public_key_files():
-        with open (pubkey_file, "rb") as f:
+        with open(pubkey_file, "rb") as f:
             pubkeys.add(Pubkey(f.read()))
     return pubkeys
 
-def _add_public_key_to_repo(pubkey: Pubkey, file_name:str) -> None:
+
+def _add_public_key_to_repo(pubkey: Pubkey, file_name: str) -> None:
     pubkeys_folder = os.path.join(get_root(), BARK_CONFIG, "pubkeys")
     if not os.path.exists(pubkeys_folder):
         os.makedirs(pubkeys_folder)
@@ -139,54 +139,48 @@ def _add_public_key_to_repo(pubkey: Pubkey, file_name:str) -> None:
         f.write(pubkey.bytes)
     cmd("git", "add", f"{pubkeys_folder}/{file_name}")
 
+
 def add_public_keys_interactive(repo: Repository) -> None:
     click.echo("This rule requires at least one public key to be added in your repo!\n")
     pubkeys = load_public_keys()
-    
+
     if len(pubkeys) > 0:
         click.echo("Found public keys in your repository! ", nl=False)
-        if not click.confirm(
-            "Do you want to add more public keys?"
-        ):
+        if not click.confirm("Do you want to add more public keys?"):
             return
-        
+
     p_key = get_pubkey_from_git(repo)
     if p_key and p_key not in pubkeys:
-        click.echo(f"Found {p_key.type} key with identifier {p_key.fingerprint}. ", nl=False)
-        if click.confirm(
-            "Do you want to add this public key to the repo?"
-        ):
-            file_name = click_prompt(
-                prompt="Enter the name for the public key"
-            )
+        click.echo(
+            f"Found {p_key.type} key with identifier {p_key.fingerprint}. ", nl=False
+        )
+        if click.confirm("Do you want to add this public key to the repo?"):
+            file_name = click_prompt(prompt="Enter the name for the public key")
             _add_public_key_to_repo(p_key, file_name)
             pubkeys.add(p_key)
-            
-    cont = True
-    while cont:
+
+    while True:
         if len(pubkeys) == 0:
             identifier = click_prompt("Enter the identifier for a new signing key")
         else:
             identifier = click_prompt(
-                prompt="Enter the identifier for a new signing key (leave blank to skip)",
+                prompt="Enter the identifier for a new signing key "
+                "(leave blank to skip)",
                 default="",
                 show_default=False,
             )
             if not identifier:
-                cont = False
                 break
         try:
             p_key = Pubkey.parse(identifier)
         except Exception as e:
             click.echo(f"Failed to parse public key! {e}")
             continue
-            
-        file_name = click_prompt(
-                prompt="Enter the name for the public key"
-            )
+
+        file_name = click_prompt(prompt="Enter the name for the public key")
         _add_public_key_to_repo(p_key, file_name)
         pubkeys.add(p_key)
-    return pubkeys
+
 
 def add_authorized_keys_interactive(pubkeys: list[str]) -> str:
     click.echo("\nThe following public keys are included in your repo:")
@@ -196,12 +190,3 @@ def add_authorized_keys_interactive(pubkeys: list[str]) -> str:
         f"\nEnter the set of authorized keys as a regex pattern (e.g. {pubkey[0]})"
     )
     return authorized_keys
-
-        
-
-
-
-
-
-
-

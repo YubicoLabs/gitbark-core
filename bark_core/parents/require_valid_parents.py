@@ -18,6 +18,7 @@ from gitbark.rule import Rule, RuleViolation
 
 import click
 
+
 class RequireValidParents(Rule):
     """Specifies whether non-valid parents should be allowed."""
 
@@ -26,14 +27,10 @@ class RequireValidParents(Rule):
 
     def validate(self, commit: Commit):
         cache = self.cache
-        validate_invalid_parents(
-            commit, cache, self.allow_explicit
-        )
+        validate_invalid_parents(commit, cache, self.allow_explicit)
 
 
-def validate_invalid_parents(
-    commit: Commit, cache: Cache, allow_explicit: bool
-):        
+def validate_invalid_parents(commit: Commit, cache: Cache, allow_explicit: bool):
     parents = commit.parents
     invalid_parents = []
 
@@ -44,7 +41,7 @@ def validate_invalid_parents(
 
     if len(invalid_parents) == 0:
         return
-    
+
     if len(invalid_parents) > 0 and not allow_explicit:
         raise RuleViolation("Commit has invalid parents")
 
@@ -54,9 +51,11 @@ def validate_invalid_parents(
         if hash not in commit_msg:
             raise RuleViolation("Commit has invalid parents")
 
+
 def setup():
     allow_explicit = click.confirm(
-        "Do you want to allow non-valid parents if their hashes are included in the commit message?"
+        "Do you want to allow non-valid parents if their hashes are included in the "
+        "commit message?"
     )
     if allow_explicit:
         return {"require_valid_parents": {"allow_explicit": allow_explicit}}
