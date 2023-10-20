@@ -14,22 +14,9 @@
 
 from gitbark.git import Commit
 from gitbark.cli.util import click_prompt, CliFail, click_callback
+from ..approvals import ApprovalRequest, SigningKey, PgpSigningKey, SshSigningKey
 
-from dataclasses import dataclass
-from enum import IntEnum
-import subprocess
 import click
-
-
-class KeyType(IntEnum):
-    GPG = 1
-    SSH = 2
-
-
-@dataclass
-class SigningKey:
-    identifier: str
-    type: KeyType
 
 
 @click_callback()
@@ -38,8 +25,8 @@ def click_parse_commit(ctx, param, val):
     repo = project.repo
 
     try:
-        object = repo.revparse_single(val)
-        return Commit(object.id)
+        target = repo.revparse_single(val)
+        return Commit(target.id.hex, repo)
     except Exception:
         raise CliFail(f"{val} is not a valid commit object!")
 
@@ -66,8 +53,9 @@ def approve(ctx, commit, gpg_key_id, ssh_key_path):
 
     project = ctx.obj["project"]
     repo = project.repo
+    branch = repo.head.shorthand
 
-    key = None
+    key: SigningKey
 
     if not gpg_key_id and not ssh_key_path:
         config = repo.config
@@ -76,15 +64,15 @@ def approve(ctx, commit, gpg_key_id, ssh_key_path):
             type = config["gpg.format"] if "gpg.format" in config else "openpgp"
 
             if type == "openpgp":
-                key = SigningKey(identifier, KeyType.GPG)
+                key = PgpSigningKey(identifier)
             elif type == "ssh":
-                key = SigningKey(identifier, KeyType.SSH)
+                key = SshSigningKey(identifier)
 
     if gpg_key_id:
-        key = SigningKey(identifier, KeyType.GPG)
+        key = PgpSigningKey(identifier)
 
     if ssh_key_path:
-        key = SigningKey(identifier, KeyType.SSH)
+        key = SshSigningKey(identifier)
 
     if not key:
         identifier = click_prompt(prompt="Enter key identifier")
@@ -93,38 +81,12 @@ def approve(ctx, commit, gpg_key_id, ssh_key_path):
             type=click.Choice(["GPG", "SSH"]),
             show_choices=False,
         )
-        type = KeyType.GPG if type == "GPG" else KeyType.SSH
-        key = SigningKey(identifier, type)
+        if type == "GPG":
+            key = PgpSigningKey(identifier)
+        else:
+            key = SshSigningKey(identifier)
 
-    sig, key_id = sign_commit(commit, key)
-
-    blob_id = repo.create_blob(sig)
-    repo.references.create(f"refs/signatures/{commit.hash}/{key_id}", blob_id)
-
-
-def sign_commit(commit: Commit, key: SigningKey):
-    commit_obj = commit.object
-    if key.type == KeyType.GPG:
-        gpg_process = subprocess.Popen(
-            ["gpg", "-u", key.identifier, "--armor", "--detach-sign", "-"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-        )
-        sig, _ = gpg_process.communicate(input=commit_obj)
-        return sig, key.identifier
-    else:
-        ssh_process = subprocess.Popen(
-            ["ssh-keygen", "-Y", "sign", "-f", key.identifier, "-n", "git"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-        )
-        sig, _ = ssh_process.communicate(input=commit_obj)
-        return sig, get_ssh_key_id(key.identifier)
-
-
-def get_ssh_key_id(ssh_key_path: str):
-    output = subprocess.check_output(
-        ["ssh-keygen", "-l", "-f", ssh_key_path], text=True
-    ).rstrip()
-    key_id = output.split(":")[1].split()[0]
-    return key_id
+    request = ApprovalRequest.lookup(commit, branch)
+    if not request:
+        raise CliFail("Approval request not found")
+    request.approve(key)
