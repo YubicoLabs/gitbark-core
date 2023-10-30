@@ -13,8 +13,7 @@
 # limitations under the License.
 
 from gitbark.git import Commit
-from gitbark.cli.util import click_prompt, CliFail, click_callback
-from ..approvals import ApprovalRequest, SigningKey, PgpSigningKey, SshSigningKey
+from gitbark.cli.util import CliFail, click_callback
 
 import click
 
@@ -51,42 +50,9 @@ def approve(ctx, commit, gpg_key_id, ssh_key_path):
     COMMIT the commit to sign.
     """
 
-    project = ctx.obj["project"]
-    repo = project.repo
-    branch = repo.head.shorthand
+    # project = ctx.obj["project"]
+    # repo = project.repo
+    # branch = repo.head.shorthand
 
-    key: SigningKey
-
-    if not gpg_key_id and not ssh_key_path:
-        config = repo.config
-        if "user.signingkey" in config:
-            identifier = config["user.signingkey"]
-            type = config["gpg.format"] if "gpg.format" in config else "openpgp"
-
-            if type == "openpgp":
-                key = PgpSigningKey(identifier)
-            elif type == "ssh":
-                key = SshSigningKey(identifier)
-
-    if gpg_key_id:
-        key = PgpSigningKey(identifier)
-
-    if ssh_key_path:
-        key = SshSigningKey(identifier)
-
-    if not key:
-        identifier = click_prompt(prompt="Enter key identifier")
-        type = click_prompt(
-            prompt="Enter the key type (GPG or SSH)",
-            type=click.Choice(["GPG", "SSH"]),
-            show_choices=False,
-        )
-        if type == "GPG":
-            key = PgpSigningKey(identifier)
-        else:
-            key = SshSigningKey(identifier)
-
-    request = ApprovalRequest.lookup(commit, branch)
-    if not request:
-        raise CliFail("Approval request not found")
-    request.approve(key)
+    # TODO: Implement
+    raise CliFail("Approval request not found")

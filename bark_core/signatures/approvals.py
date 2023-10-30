@@ -13,152 +13,106 @@
 # limitations under the License.
 
 from gitbark.git import Commit
+from gitbark.rule import BranchRule, RuleViolation
 from gitbark.util import cmd
 
-from pygit2 import Blob
-from dataclasses import dataclass
-from typing import Optional
-import abc
+from hashlib import sha256
 import logging
-import subprocess
+import os
 
 logger = logging.getLogger(__name__)
 
 
-class SigningKey(abc.ABC):
-    identifier: str
+class RequireApproval(BranchRule):
+    """Requires merge commits to include approvals."""
 
-    @abc.abstractmethod
-    def sign(self, message: bytes) -> bytes:
-        """Signs the given message"""
+    def _parse_args(self, args):
+        self.authors = set(args["authorized_authors"])
+        self.threshold = int(args["threshold"])
 
+    def validate(self, commit: Commit, branch: str):
+        c = commit._Commit__object
+        approvals = {p for p in c.parents if p.tree_id == c.tree_id}
+        parents = {p for p in c.parents if p not in approvals}
+        authors = {a.author.email for a in approvals}
 
-class PgpSigningKey(SigningKey):
-    def __init__(self, key_id: str):
-        self.identifier = key_id
+        # Need at least <threshold> approved authors
+        valid_approvals = len(self.authors.intersection(authors))
+        if valid_approvals < self.threshold:
+            raise RuleViolation(
+                f"Commit {commit.hash} has {valid_approvals} valid approvals "
+                f" but expected {self.threshold}"
+            )
 
-    def sign(self, message: bytes) -> bytes:
-        return subprocess.Popen(
-            ["gpg", "-u", self.identifier, "--armor", "--detach-sign", "-"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-        ).communicate(input=message)[0]
+        # All approvals must be valid
+        for a in approvals:
+            if not self.cache.get(a.id.hex):
+                raise RuleViolation(f"Approval {a.id.hex} is not itself valid")
 
+        # All approvals must use same parents
+        first = approvals.pop()
+        for a in approvals:
+            if a.parents != first.parents:
+                print(a.parents, first.parents)
+                raise RuleViolation("All approvals do not have the same parents")
 
-class SshSigningKey(SigningKey):
-    def __init__(self, ssh_key_path: str):
-        self._ssh_key_path = ssh_key_path
-        output = subprocess.check_output(
-            ["ssh-keygen", "-l", "-f", ssh_key_path], text=True
-        ).rstrip()
-        self.identifier = output.split(":")[1].split()[0]
-
-    def sign(self, message: bytes) -> bytes:
-        return subprocess.Popen(
-            ["ssh-keygen", "-Y", "sign", "-f", self._ssh_key_path, "-n", "git"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-        ).communicate(input=message)[0]
+        # Merge may not add additional parents
+        unapproved = parents.difference(set(first.parents))
+        if unapproved:
+            raise RuleViolation(
+                "Commit adds unapproved parents: "
+                + ", ".join(u.id.hex for u in unapproved)
+            )
 
 
 def base_ref(source_commit_hash: str, target_branch: str) -> str:
     return f"refs/approvals/{source_commit_hash}/{target_branch}"
 
 
-@dataclass
-class ApprovalRequest:
-    merge_commit: Commit
-    target_branch: str
+def merge_id(commit: Commit) -> str:
+    c = commit._Commit__object
+    return sha256(b"".join(p.raw for p in c.parent_ids) + c.tree_id.raw).hexdigest()
 
-    @classmethod
-    def create(cls, merge_commit: Commit, target_branch: str) -> "ApprovalRequest":
-        c = merge_commit._Commit__object
-        source_commit_hash = c.parents[1].id.hex
-        merge_ref = f"{base_ref(source_commit_hash, target_branch)}/merge"
-        r = merge_commit._Commit__repo
-        r.create_reference(merge_ref, merge_commit.hash)
-        return cls(merge_commit, target_branch)
 
-    @classmethod
-    def lookup(
-        cls, source_commit: Commit, target_branch: str
-    ) -> Optional["ApprovalRequest"]:
-        ref = base_ref(source_commit.hash, target_branch)
-        r = source_commit._Commit__repo
-        try:
-            cmd("git", "fetch", "origin", f"{ref}/*:{ref}/*")
-        except Exception:
-            logger.warn(f"Failed to fetch from '{ref}/*'")
-        try:
-            merge_hash = r.lookup_reference(f"{ref}/merge").target.hex
-            merge_commit = Commit(merge_hash, r)
-            return cls(merge_commit, target_branch)
-        except KeyError:
-            return None
+def approval_ref_base(commit: Commit, target_branch: str) -> str:
+    mid = merge_id(commit)
+    return f"refs/approvals/{target_branch}/{mid}/"
 
-    @property
-    def message(self) -> bytes:
-        c = self.merge_commit._Commit__object
-        return b"".join(p.raw for p in c.parent_ids) + c.tree_id.raw
 
-    @property
-    def base_ref(self) -> str:
-        c = self.merge_commit._Commit__object
-        source_commit_hash = c.parents[1].id.hex
-        return base_ref(source_commit_hash, self.target_branch)
+def create_request(commit: Commit, target_branch: str):
+    ref_base = approval_ref_base(commit, target_branch)
+    ref = f"{ref_base}{os.urandom(8).hex()}"
+    r = commit._Commit__repo
+    r.create_reference(ref, r.branches.get(target_branch).target)
+    r.checkout(ref)
+    cmd("git", "merge", "--no-ff", commit.hash)
 
-    @property
-    def tree_ref(self) -> str:
-        c = self.merge_commit._Commit__object
-        return f"{self.base_ref}/{c.tree_id.hex}"
 
-    @property
-    def approvals(self) -> list[str]:
-        sig_refs = f"{self.tree_ref}/"
-        try:
-            cmd("git", "fetch", "origin", f"{sig_refs}*:{sig_refs}*")
-        except Exception:
-            logger.warn(f"Failed to fetch from '{sig_refs}*'")
+def add_approval(commit: Commit, target_branch: str):
+    ref_base = approval_ref_base(commit, target_branch)
+    ref = f"{ref_base}{os.urandom(8).hex()}"
+    r = commit._Commit__repo
+    c = commit._Commit__object
+    parents = [p.hex for p in c.parent_ids]
+    parents_args: list = sum([["-p", p] for p in parents], [])
+    c_id = r.create_commit()
+    c_id = cmd("git", "commit-tree", c.tree_id.hex, "-m", "Approved ", *parents_args)[0]
+    r.create_reference(ref, c_id)
+    r.checkout(ref)
+    cmd("git", "commit", "--amend")
 
-        r = self.merge_commit._Commit__repo
-        references = r.references.iterator()
-        approvals = []
-        for ref in references:
-            if ref.name.startswith(sig_refs):
-                target = r.get(ref.target)
-                if isinstance(target, Blob):
-                    approvals.append(target.data.decode())
-        return approvals
 
-    def approve(self, key: SigningKey) -> None:
-        signature = key.sign(self.message)
-        r = self.merge_commit._Commit__repo
-        blob_id = r.create_blob(signature)
-        r.create_reference(f"{self.tree_ref}/{key.identifier}", blob_id)
-
-    def is_stale(self) -> bool:
-        r = self.merge_commit._Commit__repo
-        head_id = r.branches.get(self.target_branch).target
-        c = self.merge_commit._Commit__object
-        return head_id not in c.parent_ids
-
-    def checkout(self) -> None:
-        cmd("git", "checkout", f"{self.base_ref}/merge")
-
-    def merge(self) -> None:
-        if self.is_stale():
-            raise ValueError("Cannot merge stale ApprovalRequest")
-
-        self.checkout()
-        message = "\n\n".join(
-            [self.merge_commit.message, "Approvals:"] + self.approvals
-        )
-        subprocess.Popen(
-            ["git", "commit", "--amend", "-F", "-"],
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE,
-        ).communicate(input=message.encode())
-        r = self.merge_commit._Commit__repo
-        commit_id = r.head.target
-        cmd("git", "checkout", self.target_branch)
-        cmd("git", "reset", "--hard", commit_id.hex)
+def create_merge(commit: Commit, target_branch: str):
+    r = commit._Commit__repo
+    ref_base = approval_ref_base(commit, target_branch)
+    approvals = [
+        ref.target.hex
+        for ref in r.references.iterator()
+        if ref.name.startswith(ref_base)
+    ]
+    c = commit._Commit__object
+    branch_parent = c.parent_ids[0].hex
+    parents = [branch_parent] + approvals
+    parents_args: list = sum([["-p", p] for p in parents], [])
+    # Does not sign!
+    print("git", "commit-tree", c.tree_id.hex, "-m", "Approved merge", *parents_args)

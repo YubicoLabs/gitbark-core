@@ -13,13 +13,13 @@
 # limitations under the License.
 
 from gitbark.git import Commit
-from gitbark.rule import Rule, RuleViolation
+from gitbark.rule import CommitRule, RuleViolation
 from gitbark.cli.util import click_prompt
 
 from typing import Union
 
 
-class FileNotModified(Rule):
+class FileNotModified(CommitRule):
     """Prevents modification to specific files."""
 
     def _parse_args(self, args):

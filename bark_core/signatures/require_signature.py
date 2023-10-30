@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from gitbark.git import Commit
-from gitbark.rule import Rule, RuleViolation
+from gitbark.rule import CommitRule, RuleViolation
 from gitbark.cli.util import get_root
 
 from .util import (
@@ -28,8 +28,12 @@ from .util import (
 from pygit2 import Repository
 
 
-class RequireSignature(Rule):
+class RequireSignature(CommitRule):
     """Requires the commit to be signed."""
+
+    @property
+    def is_commit_rule(self):
+        return True
 
     def _parse_args(self, args):
         self.authorized_keys = args["authorized_keys"]

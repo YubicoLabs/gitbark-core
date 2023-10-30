@@ -14,12 +14,12 @@
 
 from gitbark.git import Commit
 from gitbark.project import Cache
-from gitbark.rule import Rule, RuleViolation
+from gitbark.rule import CommitRule, RuleViolation
 
 import click
 
 
-class RequireValidParents(Rule):
+class RequireValidParents(CommitRule):
     """Specifies whether non-valid parents should be allowed."""
 
     def _parse_args(self, args):
