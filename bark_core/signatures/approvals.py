@@ -92,11 +92,11 @@ def add_approval(commit: Commit, target_branch: str):
     ref_base = approval_ref_base(commit, target_branch)
     ref = f"{ref_base}{os.urandom(8).hex()}"
     r = commit._Commit__repo
-    c = commit._Commit__object
-    parents = [p.hex for p in c.parent_ids]
+    parents = [p.hash.hex() for p in commit.parents]
     parents_args: list = sum([["-p", p] for p in parents], [])
-    c_id = r.create_commit()
-    c_id = cmd("git", "commit-tree", c.tree_id.hex, "-m", "Approved ", *parents_args)[0]
+    c_id = cmd(
+        "git", "commit-tree", commit.tree_hash.hex(), "-m", "Approved ", *parents_args
+    )[0]
     r.create_reference(ref, c_id)
     r.checkout(ref)
     cmd("git", "commit", "--amend")
@@ -104,16 +104,22 @@ def add_approval(commit: Commit, target_branch: str):
 
 
 def create_merge(commit: Commit, target_branch: str):
-    r = commit._Commit__repo
     ref_base = approval_ref_base(commit, target_branch)
+    r = commit._Commit__repo
     approvals = [
         ref.target.hex
         for ref in r.references.iterator()
         if ref.name.startswith(ref_base)
     ]
-    c = commit._Commit__object
-    branch_parent = c.parent_ids[0].hex
+    branch_parent = commit.parents[0].hash.hex()
     parents = [branch_parent] + approvals
     parents_args: list = sum([["-p", p] for p in parents], [])
     # Does not sign!
-    print("git", "commit-tree", c.tree_id.hex, "-m", "Approved merge", *parents_args)
+    print(
+        "git",
+        "commit-tree",
+        commit.tree_hash.hex(),
+        "-m",
+        "Approved merge",
+        *parents_args,
+    )
