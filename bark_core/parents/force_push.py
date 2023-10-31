@@ -19,28 +19,31 @@ from gitbark.cli.util import click_prompt
 
 
 class ForcePush(BranchRule):
-    """Specifies the maximum number of parents for a commit."""
-
-    @property
-    def is_branch_rule(self):
-        return True
+    """Prevents force pushing (non-linear history)."""
 
     def _parse_args(self, args):
         self.allow = args.get("allow", False)
 
     def validate(self, commit: Commit, branch: str):
         if not self.allow:
-            prev_head_hash = self.repo.branches[branch].target
+            prev_head_hash = self.repo.branches[branch].target.raw
             prev_head = Commit(prev_head_hash, self.repo)
             if not is_descendant(prev_head, commit):
-                raise RuleViolation(f"Commit is not a descendant of {prev_head.hash}")
+                raise RuleViolation(
+                    f"Commit is not a descendant of {prev_head_hash.hex()}"
+                )
 
 
 def is_descendant(prev: Commit, new: Commit) -> bool:
     """Checks that the current tip is a descendant of the old tip"""
 
     _, exit_status = cmd(
-        "git", "merge-base", "--is-ancestor", prev.hash, new.hash, check=False
+        "git",
+        "merge-base",
+        "--is-ancestor",
+        prev.hash.hex(),
+        new.hash.hex(),
+        check=False,
     )
 
     return exit_status == 0

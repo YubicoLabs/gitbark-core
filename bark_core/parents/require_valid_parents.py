@@ -35,7 +35,7 @@ def validate_invalid_parents(commit: Commit, cache: Cache, allow_explicit: bool)
     invalid_parents = []
 
     for parent in parents:
-        value = cache.get(parent.hash)
+        value = cache.get(parent)
         if value and not value.valid:
             invalid_parents.append(parent)
 
@@ -45,7 +45,7 @@ def validate_invalid_parents(commit: Commit, cache: Cache, allow_explicit: bool)
     if len(invalid_parents) > 0 and not allow_explicit:
         raise RuleViolation("Commit has invalid parents")
 
-    invalid_parent_hashes = [parent.hash for parent in invalid_parents]
+    invalid_parent_hashes = [parent.hash.hex() for parent in invalid_parents]
     commit_msg = commit.message
     for hash in invalid_parent_hashes:
         if hash not in commit_msg:

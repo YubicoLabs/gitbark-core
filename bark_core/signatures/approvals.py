@@ -31,29 +31,27 @@ class RequireApproval(BranchRule):
         self.threshold = int(args["threshold"])
 
     def validate(self, commit: Commit, branch: str):
-        c = commit._Commit__object
-        approvals = {p for p in c.parents if p.tree_id == c.tree_id}
-        parents = {p for p in c.parents if p not in approvals}
-        authors = {a.author.email for a in approvals}
+        approvals = {p for p in commit.parents if p.tree_hash == commit.tree_hash}
+        parents = {p for p in commit.parents if p not in approvals}
+        authors = {a.author[1] for a in approvals}
 
         # Need at least <threshold> approved authors
         valid_approvals = len(self.authors.intersection(authors))
         if valid_approvals < self.threshold:
             raise RuleViolation(
-                f"Commit {commit.hash} has {valid_approvals} valid approvals "
+                f"Commit {commit.hash.hex()} has {valid_approvals} valid approvals "
                 f" but expected {self.threshold}"
             )
 
         # All approvals must be valid
         for a in approvals:
-            if not self.cache.get(a.id.hex):
-                raise RuleViolation(f"Approval {a.id.hex} is not itself valid")
+            if not self.cache.get(a):
+                raise RuleViolation(f"Approval {a.hash.hex()} is not itself valid")
 
         # All approvals must use same parents
         first = approvals.pop()
         for a in approvals:
             if a.parents != first.parents:
-                print(a.parents, first.parents)
                 raise RuleViolation("All approvals do not have the same parents")
 
         # Merge may not add additional parents
@@ -61,7 +59,7 @@ class RequireApproval(BranchRule):
         if unapproved:
             raise RuleViolation(
                 "Commit adds unapproved parents: "
-                + ", ".join(u.id.hex for u in unapproved)
+                + ", ".join(u.hash.hex() for u in unapproved)
             )
 
 
@@ -70,8 +68,9 @@ def base_ref(source_commit_hash: str, target_branch: str) -> str:
 
 
 def merge_id(commit: Commit) -> str:
-    c = commit._Commit__object
-    return sha256(b"".join(p.raw for p in c.parent_ids) + c.tree_id.raw).hexdigest()
+    return sha256(
+        b"".join(p.hash for p in commit.parents) + commit.tree_hash
+    ).hexdigest()
 
 
 def approval_ref_base(commit: Commit, target_branch: str) -> str:
@@ -85,7 +84,8 @@ def create_request(commit: Commit, target_branch: str):
     r = commit._Commit__repo
     r.create_reference(ref, r.branches.get(target_branch).target)
     r.checkout(ref)
-    cmd("git", "merge", "--no-ff", commit.hash)
+    cmd("git", "merge", "--no-ff", commit.hash.hex())
+    # TODO: commit needs to be verified!
 
 
 def add_approval(commit: Commit, target_branch: str):
@@ -100,6 +100,7 @@ def add_approval(commit: Commit, target_branch: str):
     r.create_reference(ref, c_id)
     r.checkout(ref)
     cmd("git", "commit", "--amend")
+    # TODO: commit needs to be verified!
 
 
 def create_merge(commit: Commit, target_branch: str):

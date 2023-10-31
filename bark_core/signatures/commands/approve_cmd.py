@@ -25,7 +25,7 @@ def click_parse_commit(ctx, param, val):
 
     try:
         target = repo.revparse_single(val)
-        return Commit(target.id.hex, repo)
+        return Commit(target.id.raw, repo)
     except Exception:
         raise CliFail(f"{val} is not a valid commit object!")
 
