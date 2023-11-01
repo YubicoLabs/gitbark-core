@@ -28,6 +28,21 @@ from .util import (
 from pygit2 import Repository
 
 
+def require_signature(commit: Commit, authorized_pubkeys: list[Pubkey]):
+    signature, commit_object = commit.signature
+
+    if not signature:
+        # No signature
+        raise RuleViolation("Commit was not signed")
+
+    if len(authorized_pubkeys) == 0:
+        # No pubkeys specified
+        raise RuleViolation("No public keys registered")
+
+    if not verify_signature_bulk(authorized_pubkeys, signature, commit_object):
+        raise RuleViolation("Commit was signed by untrusted key")
+
+
 class RequireSignature(CommitRule):
     """Requires the commit to be signed."""
 
@@ -45,26 +60,11 @@ class RequireSignature(CommitRule):
 
         require_signature(commit, authorized_pubkeys)
 
+    @staticmethod
+    def setup() -> dict:
+        repo = Repository(get_root())
+        add_public_keys_interactive(repo)
+        pubkeys = load_public_key_files(name_only=True)
+        authorized_keys = add_authorized_keys_interactive(pubkeys)
 
-def require_signature(commit: Commit, authorized_pubkeys: list[Pubkey]):
-    signature, commit_object = commit.signature
-
-    if not signature:
-        # No signature
-        raise RuleViolation("Commit was not signed")
-
-    if len(authorized_pubkeys) == 0:
-        # No pubkeys specified
-        raise RuleViolation("No public keys registered")
-
-    if not verify_signature_bulk(authorized_pubkeys, signature, commit_object):
-        raise RuleViolation("Commit was signed by untrusted key")
-
-
-def setup() -> dict:
-    repo = Repository(get_root())
-    add_public_keys_interactive(repo)
-    pubkeys = load_public_key_files(name_only=True)
-    authorized_keys = add_authorized_keys_interactive(pubkeys)
-
-    return {"require_signature": {"authorized_keys": authorized_keys}}
+        return {"require_signature": {"authorized_keys": authorized_keys}}

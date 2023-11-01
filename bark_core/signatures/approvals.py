@@ -15,6 +15,7 @@
 from gitbark.git import Commit
 from gitbark.rule import BranchRule, RuleViolation
 from gitbark.util import cmd
+from gitbark.cli.util import click_prompt
 
 from hashlib import sha256
 import logging
@@ -61,6 +62,21 @@ class RequireApproval(BranchRule):
                 "Commit adds unapproved parents: "
                 + ", ".join(u.hash.hex() for u in unapproved)
             )
+
+    @staticmethod
+    def setup():
+        authors = click_prompt(
+            "Enter the authorized approvers as a list of email addresses, "
+            "using space as a separator"
+        ).split()
+        threshold = click_prompt("Enter the number of required approvals", type=int)
+
+        return {
+            "require_approval": {
+                "threshold": threshold,
+                "authorised_authors": authors,
+            }
+        }
 
 
 def base_ref(source_commit_hash: str, target_branch: str) -> str:

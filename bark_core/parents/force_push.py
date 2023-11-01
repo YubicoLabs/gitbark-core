@@ -18,22 +18,6 @@ from gitbark.util import cmd
 from gitbark.cli.util import click_prompt
 
 
-class ForcePush(BranchRule):
-    """Prevents force pushing (non-linear history)."""
-
-    def _parse_args(self, args):
-        self.allow = args.get("allow", False)
-
-    def validate(self, commit: Commit, branch: str):
-        if not self.allow:
-            prev_head_hash = self.repo.branches[branch].target.raw
-            prev_head = Commit(prev_head_hash, self.repo)
-            if not is_descendant(prev_head, commit):
-                raise RuleViolation(
-                    f"Commit is not a descendant of {prev_head_hash.hex()}"
-                )
-
-
 def is_descendant(prev: Commit, new: Commit) -> bool:
     """Checks that the current tip is a descendant of the old tip"""
 
@@ -49,6 +33,22 @@ def is_descendant(prev: Commit, new: Commit) -> bool:
     return exit_status == 0
 
 
-def setup():
-    allow = click_prompt(prompt="Allow force pushing to branch", type=bool)
-    return {"force_push": {"allow": allow}}
+class ForcePush(BranchRule):
+    """Prevents force pushing (non-linear history)."""
+
+    def _parse_args(self, args):
+        self.allow = args.get("allow", False)
+
+    def validate(self, commit: Commit, branch: str):
+        if not self.allow:
+            prev_head_hash = self.repo.branches[branch].target.raw
+            prev_head = Commit(prev_head_hash, self.repo)
+            if not is_descendant(prev_head, commit):
+                raise RuleViolation(
+                    f"Commit is not a descendant of {prev_head_hash.hex()}"
+                )
+
+    @staticmethod
+    def setup():
+        allow = click_prompt(prompt="Allow force pushing to branch", type=bool)
+        return {"force_push": {"allow": allow}}
