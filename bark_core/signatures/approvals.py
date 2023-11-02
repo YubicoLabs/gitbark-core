@@ -74,7 +74,7 @@ class RequireApproval(BranchRule):
         return {
             "require_approval": {
                 "threshold": threshold,
-                "authorised_authors": authors,
+                "authorized_authors": authors,
             }
         }
 
