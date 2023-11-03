@@ -47,7 +47,7 @@ class RequireFastForward(BranchRule):
 
     @staticmethod
     def setup():
-        return {"require_fast_forward": None}
+        return "require_fast_forward"
 
 
 class MaxParents(CommitRule):
@@ -78,8 +78,7 @@ def validate_invalid_parents(
     invalid_parents = []
 
     for parent in parents:
-        value = cache.get(parent)
-        if value and not value.valid:
+        if not cache.get(parent):
             invalid_parents.append(parent)
 
     if len(invalid_parents) == 0:
@@ -99,7 +98,7 @@ class RequireValidParents(CommitRule):
     """Specifies whether non-valid parents should be allowed."""
 
     def _parse_args(self, args):
-        self.allow_explicit = args.get("allow_explicit", False)
+        self.allow_explicit = args and args.get("allow_explicit", False)
 
     def validate(self, commit: Commit):
         cache = self.cache
@@ -114,4 +113,4 @@ class RequireValidParents(CommitRule):
         if allow_explicit:
             return {"require_valid_parents": {"allow_explicit": allow_explicit}}
         else:
-            return {"require_valid_parents": None}
+            return "require_valid_parents"
