@@ -46,10 +46,6 @@ def require_signature(commit: Commit, authorized_pubkeys: list[Pubkey]):
 class RequireSignature(CommitRule):
     """Requires the commit to be signed."""
 
-    @property
-    def is_commit_rule(self):
-        return True
-
     def _parse_args(self, args):
         self.authorized_keys = args["authorized_keys"]
 
