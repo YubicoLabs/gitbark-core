@@ -13,11 +13,11 @@
 # limitations under the License.
 
 from gitbark.git import Commit
-from gitbark.rule import Rule, RuleViolation
+from gitbark.rule import CommitRule, RuleViolation
 from gitbark.cli.util import click_prompt
 
 
-class MaxParents(Rule):
+class MaxParents(CommitRule):
     """Specifies the maximum number of parents for a commit."""
 
     def _parse_args(self, args):
@@ -30,9 +30,9 @@ class MaxParents(Rule):
                 f"Commit has {len(parents)} parent(s) but expected {self.threshold}"
             )
 
-
-def setup():
-    threshold = click_prompt(
-        prompt="Enter the maxmimum number of parents for a commit", type=int
-    )
-    return {"max_parents": {"threshold": threshold}}
+    @staticmethod
+    def setup():
+        threshold = click_prompt(
+            prompt="Enter the maxmimum number of parents for a commit", type=int
+        )
+        return {"max_parents": {"threshold": threshold}}

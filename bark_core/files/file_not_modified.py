@@ -13,20 +13,10 @@
 # limitations under the License.
 
 from gitbark.git import Commit
-from gitbark.rule import Rule, RuleViolation
+from gitbark.rule import CommitRule, RuleViolation
 from gitbark.cli.util import click_prompt
 
 from typing import Union
-
-
-class FileNotModified(Rule):
-    """Prevents modification to specific files."""
-
-    def _parse_args(self, args):
-        self.pattern = args["pattern"]
-
-    def validate(self, commit: Commit):
-        validate_file_not_modified(commit, self.validator, self.pattern)
 
 
 def validate_file_not_modified(
@@ -44,8 +34,18 @@ def validate_file_not_modified(
         raise RuleViolation(f"Commit modified locked file(s): {files}")
 
 
-def setup():
-    pattern = click_prompt(
-        prompt="Enter the pattern for the files you wish to remain unmodified"
-    )
-    return {"file_not_modified": {"pattern": pattern}}
+class FileNotModified(CommitRule):
+    """Prevents modification to specific files."""
+
+    def _parse_args(self, args):
+        self.pattern = args["pattern"]
+
+    def validate(self, commit: Commit):
+        validate_file_not_modified(commit, self.validator, self.pattern)
+
+    @staticmethod
+    def setup():
+        pattern = click_prompt(
+            prompt="Enter the pattern for the files you wish to remain unmodified"
+        )
+        return {"file_not_modified": {"pattern": pattern}}

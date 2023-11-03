@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from gitbark.git import Commit
-from gitbark.rule import Rule, RuleViolation
+from gitbark.rule import CommitRule, RuleViolation
 from gitbark.cli.util import get_root
 
 from .util import (
@@ -26,20 +26,6 @@ from .util import (
 )
 
 from pygit2 import Repository
-
-
-class RequireSignature(Rule):
-    """Requires the commit to be signed."""
-
-    def _parse_args(self, args):
-        self.authorized_keys = args["authorized_keys"]
-
-    def validate(self, commit: Commit):
-        authorized_pubkeys = get_authorized_pubkeys(
-            self.validator, self.authorized_keys
-        )
-
-        require_signature(commit, authorized_pubkeys)
 
 
 def require_signature(commit: Commit, authorized_pubkeys: list[Pubkey]):
@@ -57,10 +43,24 @@ def require_signature(commit: Commit, authorized_pubkeys: list[Pubkey]):
         raise RuleViolation("Commit was signed by untrusted key")
 
 
-def setup() -> dict:
-    repo = Repository(get_root())
-    add_public_keys_interactive(repo)
-    pubkeys = load_public_key_files(name_only=True)
-    authorized_keys = add_authorized_keys_interactive(pubkeys)
+class RequireSignature(CommitRule):
+    """Requires the commit to be signed."""
 
-    return {"require_signature": {"authorized_keys": authorized_keys}}
+    def _parse_args(self, args):
+        self.authorized_keys = args["authorized_keys"]
+
+    def validate(self, commit: Commit):
+        authorized_pubkeys = get_authorized_pubkeys(
+            self.validator, self.authorized_keys
+        )
+
+        require_signature(commit, authorized_pubkeys)
+
+    @staticmethod
+    def setup() -> dict:
+        repo = Repository(get_root())
+        add_public_keys_interactive(repo)
+        pubkeys = load_public_key_files(name_only=True)
+        authorized_keys = add_authorized_keys_interactive(pubkeys)
+
+        return {"require_signature": {"authorized_keys": authorized_keys}}
