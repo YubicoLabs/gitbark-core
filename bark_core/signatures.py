@@ -20,7 +20,6 @@ from gitbark.util import cmd
 from pgpy import PGPKey, PGPSignature
 from paramiko import PKey
 from typing import Any, Union, Optional, Tuple
-from pygit2 import Repository
 
 import subprocess
 import warnings
@@ -118,10 +117,9 @@ def get_authorized_pubkeys(
     return [Pubkey(blob) for blob in blobs]
 
 
-def get_pubkey_from_git(repo: Repository) -> Optional[Pubkey]:
-    config = repo.config
-    if "user.signingkey" in config:
-        identifier = config["user.signingkey"]
+def get_pubkey_from_git() -> Optional[Pubkey]:
+    identifier = cmd("git", "config", "user.signingKey")[0]
+    if identifier:
         return Pubkey.parse(identifier)
     return None
 
@@ -155,7 +153,7 @@ def _add_public_key_to_repo(pubkey: Pubkey, file_name: str) -> None:
     cmd("git", "add", f"{pubkeys_folder}/{file_name}")
 
 
-def add_public_keys_interactive(repo: Repository) -> None:
+def add_public_keys_interactive() -> None:
     click.echo("This rule requires at least one public key to be added in your repo!\n")
     pubkeys = load_public_keys()
 
@@ -164,7 +162,7 @@ def add_public_keys_interactive(repo: Repository) -> None:
         if not click.confirm("Do you want to add more public keys?"):
             return
 
-    p_key = get_pubkey_from_git(repo)
+    p_key = get_pubkey_from_git()
     if p_key and p_key not in pubkeys:
         click.echo(
             f"Found {p_key.type} key with identifier {p_key.fingerprint}. ", nl=False
@@ -237,8 +235,7 @@ class RequireSignature(CommitRule):
 
     @staticmethod
     def setup() -> dict:
-        repo = Repository(get_root())
-        add_public_keys_interactive(repo)
+        add_public_keys_interactive()
         pubkeys = load_public_key_files(name_only=True)
         authorized_keys = add_authorized_keys_interactive(pubkeys)
 

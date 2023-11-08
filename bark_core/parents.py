@@ -40,10 +40,9 @@ class RequireFastForward(BranchRule):
     """Prevents force pushing (non-linear history)."""
 
     def validate(self, commit: Commit, branch: str):
-        prev_head_hash = self.repo.branches[branch].target.raw
-        prev_head = Commit(prev_head_hash, self.repo)
+        prev_head, _ = self.repo.resolve(branch)
         if not is_descendant(prev_head, commit):
-            raise RuleViolation(f"Commit is not a descendant of {prev_head_hash.hex()}")
+            raise RuleViolation(f"Commit is not a descendant of {prev_head.hash.hex()}")
 
     @staticmethod
     def setup():
