@@ -255,16 +255,15 @@ def approve(ctx, merge_id: Optional[str], create: bool, checkout: bool, merge) -
     project = ctx.obj["project"]
     repo = project.repo
 
-    branch = cmd("git", "branch", "--show-current")[0]
+    branch = repo.branch
     if not branch:
         # Check if an approval ref is checked out
-        line = cmd("git", "log", "-n1", "--oneline", "--decorate")[0]
-        line = line[line.index("(") + 1 : line.index(")")]
-        refs = [r for r in line.split(", ") if r.startswith(APPROVALS)]
-        approvals = {parse_ref(r)[:2] for r in refs}
+        approvals = {
+            parse_ref(r) for r in repo.head.references if r.startswith(APPROVALS)
+        }
         if len(approvals) != 1:
             raise CliFail("Target branch must be checked out")
-        branch, m_id = approvals.pop()
+        branch, m_id, _ = approvals.pop()
         if merge_id and merge_id != m_id:
             raise CliFail("Explicit MERGE_ID given that doesn't match HEAD")
         merge_id = m_id
