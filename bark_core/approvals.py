@@ -156,7 +156,19 @@ def is_merging(commit: Commit) -> bool:
 
 
 class RequireApproval(BranchRule):
-    """Requires merge commits to include approvals."""
+    """Requires commits on the branch to be *Approved*.
+
+    An *Approved* commit is a merge commit comprising a previous commit from the target
+    ref, followed by one or more *Approval* commits. All its approval commits must have
+    the same tree hash as the approved commit, and must include the approved commits
+    initial parent in their set of parents. All approval commits must also have the same
+    set of parents, and must be valid according to their commit rules.
+
+    Essentially, an approval commit is a "normal" merge commit, with additional
+    approvals being copies of the first approval, but with different authors (and
+    possible messages). The *approved* commit is then an octo-merge commit containing
+    the merge target, and all approval commits.
+    """
 
     def _parse_args(self, args):
         self.authors = set(args["authorized_authors"])
@@ -174,9 +186,14 @@ class RequireApproval(BranchRule):
                 "to create a merge request."
             )
 
-        approvals = {p for p in commit.parents if p.tree_hash == commit.tree_hash}
-        parents = {p for p in commit.parents if p not in approvals}
+        approvals = commit.parents
+        old_head = approvals.pop(0)  # First parent is old head of target ref
         authors = {a.author[1] for a in approvals}
+
+        # All approvals must have same tree hash as commit
+        for a in approvals:
+            if a.tree_hash != commit.tree_hash:
+                raise RuleViolation(f"Approval {a.hash.hex()} has wrong tree hash")
 
         # All approvals must be valid
         for a in approvals:
@@ -189,13 +206,9 @@ class RequireApproval(BranchRule):
             if a.parents != first.parents:
                 raise RuleViolation("All approvals do not have the same parents")
 
-        # Merge may not add additional parents
-        unapproved = parents.difference(set(first.parents))
-        if unapproved:
-            raise RuleViolation(
-                "Commit adds unapproved parents: "
-                + ", ".join(u.hash.hex() for u in unapproved)
-            )
+        # Old head must be in approvals
+        if old_head not in first.parents:
+            raise RuleViolation(f"Commit adds unapproved parent: {old_head}")
 
         # Need at least <threshold> approved authors
         valid_approvals = len(self.authors.intersection(authors))
@@ -255,16 +268,15 @@ def approve(ctx, merge_id: Optional[str], create: bool, checkout: bool, merge) -
     project = ctx.obj["project"]
     repo = project.repo
 
-    branch = cmd("git", "branch", "--show-current")[0]
+    branch = repo.branch
     if not branch:
         # Check if an approval ref is checked out
-        line = cmd("git", "log", "-n1", "--oneline", "--decorate")[0]
-        line = line[line.index("(") + 1 : line.index(")")]
-        refs = [r for r in line.split(", ") if r.startswith(APPROVALS)]
-        approvals = {parse_ref(r)[:2] for r in refs}
+        approvals = {
+            parse_ref(r) for r in repo.head.references if r.startswith(APPROVALS)
+        }
         if len(approvals) != 1:
             raise CliFail("Target branch must be checked out")
-        branch, m_id = approvals.pop()
+        branch, m_id, _ = approvals.pop()
         if merge_id and merge_id != m_id:
             raise CliFail("Explicit MERGE_ID given that doesn't match HEAD")
         merge_id = m_id

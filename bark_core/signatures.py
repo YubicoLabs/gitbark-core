@@ -118,7 +118,7 @@ def get_authorized_pubkeys(
 
 
 def get_pubkey_from_git() -> Optional[Pubkey]:
-    identifier = cmd("git", "config", "user.signingKey")[0]
+    identifier = cmd("git", "config", "user.signingKey", check=False)[0]
     if identifier:
         return Pubkey.parse(identifier)
     return None
