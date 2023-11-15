@@ -57,7 +57,7 @@ class MaxParents(CommitRule):
 
     def validate(self, commit: Commit):
         parents = commit.parents
-        if len(parents) < self.threshold:
+        if len(parents) > self.threshold:
             raise RuleViolation(
                 f"Commit has {len(parents)} parent(s) but expected {self.threshold}"
             )
