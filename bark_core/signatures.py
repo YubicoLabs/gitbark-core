@@ -17,11 +17,12 @@ from gitbark.rule import CommitRule, RuleViolation
 from gitbark.cli.util import get_root, click_prompt
 from gitbark.util import cmd
 
-from pgpy import PGPKey, PGPSignature
+from pgpy import PGPKey as _PGPKey, PGPSignature
 from paramiko import PKey
-from typing import Any, Union, Optional, Tuple
+from typing import Any, Union, Optional
 
-import subprocess
+from abc import ABC, abstractmethod
+
 import warnings
 import os
 import click
@@ -29,68 +30,12 @@ import click
 warnings.filterwarnings("ignore")
 
 
-class Pubkey:
+class Pubkey(ABC):
     def __init__(self, pubkey: bytes) -> None:
-        self.bytes = pubkey
-        self.key, self.fingerprint = self._parse_pubkey(pubkey)
+        self._bytes = pubkey
 
-    @property
-    def type(self) -> str:
-        if isinstance(self.key, PGPKey):
-            return "PGP"
-        else:
-            return "SSH"
-
-    @classmethod
-    def parse(cls, identifier: str) -> "Pubkey":
-        try:
-            pubkey = subprocess.check_output(["gpg", "--armor", "--export", identifier])
-            return cls(pubkey=pubkey)
-        except Exception:
-            pass
-        try:
-            with open(identifier, "rb") as f:
-                pubkey = f.read()
-            return cls(pubkey=pubkey)
-        except Exception:
-            pass
-        raise
-
-    def _parse_pubkey(self, pubkey: bytes) -> Tuple[Union[PGPKey, PKey], str]:
-        try:
-            key, _ = PGPKey.from_blob(pubkey)
-            fingerprint = str(key.fingerprint)
-            return key, fingerprint
-        except Exception:
-            pass
-        try:
-            key = PKey(data=pubkey)
-            fingerprint = key.fingerprint.split(":")[1]
-            return key, fingerprint
-        except Exception:
-            pass
-        raise ValueError("Could not parse public key!")
-
-    def verify_signature(self, signature, subject) -> bool:
-        if isinstance(self.key, PGPKey):
-            return self._verify_pgp_signature(self.key, signature, subject)
-        else:
-            return self._verify_ssh_signature(self.key, signature, subject)
-
-    def _verify_ssh_signature(self, pubkey: PKey, signature: Any, subject: Any) -> bool:
-        return pubkey.verify_ssh_sig(subject, signature)
-
-    def _verify_pgp_signature(
-        self, pubkey: PGPKey, signature: Any, subject: Any
-    ) -> bool:
-        signature = PGPSignature().from_blob(signature)
-        try:
-            if pubkey.verify(subject, signature):
-                return True
-            else:
-                return False
-        except Exception:
-            return False
+    def __bytes__(self):
+        return self._bytes
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, Pubkey):
@@ -99,6 +44,120 @@ class Pubkey:
 
     def __hash__(self) -> int:
         return hash(self.fingerprint)
+
+    @property
+    @abstractmethod
+    def fingerprint(self) -> str:
+        pass
+
+    @property
+    @abstractmethod
+    def type(self) -> str:
+        pass
+
+    @abstractmethod
+    def verify_signature(self, signature: bytes, subject: bytes) -> bool:
+        pass
+
+    @classmethod
+    @abstractmethod
+    def _load_blob(cls, identifier: str) -> bytes:
+        pass
+
+    @classmethod
+    def from_identifier(cls, identifier: str) -> "Pubkey":
+        for key_class in cls.__subclasses__():
+            try:
+                blob = key_class._load_blob(identifier)
+                return key_class(blob)
+            except Exception:
+                pass
+        raise ValueError("Unsupported key type")
+
+    @classmethod
+    def from_blob(cls, pubkey: bytes) -> "Pubkey":
+        for key_class in cls.__subclasses__():
+            try:
+                return key_class(pubkey)
+            except Exception:
+                pass
+        raise ValueError("Unsupported key type")
+
+
+class PgpKey(Pubkey):
+    def __init__(self, pubkey: bytes) -> None:
+        super().__init__(pubkey)
+        key, _ = _PGPKey.from_blob(pubkey)
+        self._key = key
+
+    @property
+    def type(self) -> str:
+        return "PGP"
+
+    @property
+    def fingerprint(self) -> str:
+        return str(self._key.fingerprint)
+
+    def verify_signature(self, signature: bytes, subject: bytes) -> bool:
+        if self._is_pgp_signature(signature):
+            signature = PGPSignature.from_blob(signature)
+            try:
+                if self._key.verify(subject, signature):
+                    return True
+                else:
+                    return False
+            except Exception:
+                return False
+        return False
+
+    @classmethod
+    def _load_blob(cls, identifier: str) -> bytes:
+        try:
+            pubkey = cmd("gpg", "--armor", "--export", identifier, text=False)[0]
+            return pubkey
+        except Exception:
+            raise ValueError(f"Could not parse PGP key from identifier '{identifier}'")
+
+    def _is_pgp_signature(self, signature: bytes):
+        if b"-----BEGIN PGP SIGNATURE-----" in signature:
+            return True
+        else:
+            return False
+
+
+class SshKey(Pubkey):
+    def __init__(self, pubkey: bytes) -> None:
+        super().__init__(pubkey)
+        key = PKey(data=pubkey)
+        self._key = key
+
+    @property
+    def type(self) -> str:
+        return "SSH"
+
+    @property
+    def fingerprint(self) -> str:
+        return self._key.fingerprint.split(":")[1]
+
+    def verify_signature(self, signature: bytes, subject: bytes) -> bool:
+        if self._is_ssh_signature(signature):
+            return self._key.verify_ssh_sig(subject, signature)
+        return False
+
+    @classmethod
+    def _load_blob(cls, identifier: str) -> bytes:
+        try:
+            with open(identifier, "rb") as f:
+                pubkey = f.read()
+                return pubkey
+        except Exception:
+            raise ValueError(f"Could not parse SSH key with identifier '{identifier}'")
+
+    def _is_ssh_signature(self, signature: bytes):
+        if b"-----BEGIN SSH SIGNATURE-----" in signature:
+            return True
+        else:
+            return False
 
 
 def verify_signature_bulk(pubkeys: list[Pubkey], signature: Any, subject: Any) -> bool:
@@ -114,13 +173,13 @@ def get_authorized_pubkeys(
 ) -> list[Pubkey]:
     files = validator.list_files(authorized_keys_patterns, f"{BARK_CONFIG}/pubkeys")
     blobs = [validator.read_file(f) for f in files]
-    return [Pubkey(blob) for blob in blobs]
+    return [Pubkey.from_blob(blob) for blob in blobs]
 
 
 def get_pubkey_from_git() -> Optional[Pubkey]:
     identifier = cmd("git", "config", "user.signingKey", check=False)[0]
     if identifier:
-        return Pubkey.parse(identifier)
+        return Pubkey.from_identifier(identifier)
     return None
 
 
@@ -139,7 +198,7 @@ def load_public_keys() -> set[Pubkey]:
     pubkeys = set()
     for pubkey_file in load_public_key_files():
         with open(pubkey_file, "rb") as f:
-            pubkeys.add(Pubkey(f.read()))
+            pubkeys.add(Pubkey.from_blob(f.read()))
     return pubkeys
 
 
@@ -149,7 +208,7 @@ def _add_public_key_to_repo(pubkey: Pubkey, file_name: str) -> None:
         os.makedirs(pubkeys_folder)
 
     with open(f"{pubkeys_folder}/{file_name}", "wb") as f:
-        f.write(pubkey.bytes)
+        f.write(bytes(pubkey))
     cmd("git", "add", f"{pubkeys_folder}/{file_name}")
 
 
@@ -185,7 +244,7 @@ def add_public_keys_interactive() -> None:
             if not identifier:
                 break
         try:
-            p_key = Pubkey.parse(identifier)
+            p_key = Pubkey.from_identifier(identifier)
         except Exception as e:
             click.echo(f"Failed to parse public key! {e}")
             continue
