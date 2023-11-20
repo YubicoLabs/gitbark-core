@@ -88,7 +88,7 @@ def repo_merge_request_dump(
         )
 
     with on_dir(repo._path):
-        bark_cli("approve", "--create")
+        bark_cli("approvals", "create")
 
     dump_path = tmp_path_factory.mktemp("dump")
     dump(repo, dump_path)
@@ -135,7 +135,7 @@ def test_create_merge_request(repo_approvals: Repository, bark_cli):
         )
     cmd("git", "config", "user.email", APPROVER_1, cwd=repo_approvals._path)
     with on_dir(repo_approvals._path):
-        bark_cli("approve", "--create")
+        bark_cli("approvals", "create")
 
 
 def test_approve_and_merge_request(repo_merge_request: Repository, bark_cli):
@@ -144,8 +144,8 @@ def test_approve_and_merge_request(repo_merge_request: Repository, bark_cli):
     cmd("git", "config", "user.email", APPROVER_2, cwd=repo_merge_request._path)
     post_head = repo_merge_request.head
     with on_dir(repo_merge_request._path):
-        bark_cli("approve", m_id, input=f"{APPROVER_2} approves!")
-        bark_cli("approve", m_id, "--merge")
+        bark_cli("approvals", "approve", m_id, input=f"{APPROVER_2} approves!")
+        bark_cli("approvals", "merge", m_id)
 
     # The new head should point to the merge commit
     assert post_head != repo_merge_request.head
