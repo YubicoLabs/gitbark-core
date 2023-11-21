@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from gitbark.git import Commit
+from gitbark.git import Commit, is_descendant
 from gitbark.rule import RefRule, RuleViolation
 from gitbark.util import cmd
 from gitbark.cli.util import CliFail, click_prompt
@@ -394,3 +394,27 @@ def list_merge_requests(ctx):
     for m_id in requests:
         n_approvals = len(requests[m_id])
         click.echo(f"{m_id} ({n_approvals}/? approvals)")
+
+
+@approvals.command()
+@click.pass_context
+def clean(ctx):
+    """Delete approval refs.
+
+    This will delete any approval refs that are included in a
+    finalized merge.
+    """
+
+    project = ctx.obj["project"]
+    repo = project.repo
+
+    branch = repo.branch
+    if not branch:
+        raise CliFail("Target branch must be checked out")
+
+    head = repo.head
+    requests = list_approvals(repo.references, branch)
+    for approvals in requests.values():
+        if all(is_descendant(repo.references[a], head) for a in approvals):
+            for a in approvals:
+                cmd("git", "update-ref", "-d", a)
