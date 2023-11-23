@@ -13,7 +13,7 @@
 # limitations under the License.
 
 from gitbark.git import Commit
-from gitbark.rule import BranchRule, RuleViolation
+from gitbark.rule import RefRule, RuleViolation
 from gitbark.util import cmd
 from gitbark.cli.util import CliFail, click_prompt
 
@@ -75,17 +75,10 @@ def list_approvals(references: dict[str, Commit], branch: str) -> dict[str, list
 
 def create_request(commit: Commit, target_branch: str):
     """Takes a merge commit and moves it to a special approval ref"""
-    # TODO: Assert target_branch currently points to commit
     ref_base = approval_ref_base(commit, target_branch)
     ref = f"{ref_base}{get_author_id()}"
     # Create the new ref
     cmd("git", "update-ref", ref, commit.hash.hex())
-    # Reset the old one
-    cmd(
-        "git", "update-ref", f"refs/heads/{target_branch}", commit.parents[0].hash.hex()
-    )
-    cmd("git", "reset", "--hard")
-    # TODO: commit needs to be verified!
 
 
 def add_approval(
@@ -155,8 +148,8 @@ def is_merging(commit: Commit) -> bool:
     return True
 
 
-class RequireApproval(BranchRule):
-    """Requires commits on the branch to be *Approved*.
+class RequireApproval(RefRule):
+    """Requires commits on the ref to be *Approved*.
 
     An *Approved* commit is a merge commit comprising a previous commit from the target
     ref, followed by one or more *Approval* commits. All its approval commits must have
@@ -174,7 +167,7 @@ class RequireApproval(BranchRule):
         self.authors = set(args["authorized_authors"])
         self.threshold = int(args["threshold"])
 
-    def validate(self, commit: Commit, branch: str):
+    def validate(self, commit: Commit, ref: str):
         # Must be a merge commit
         if len(commit.parents) < 2:
             raise RuleViolation("Not an approved merge commit")
@@ -319,7 +312,7 @@ def approve(ctx, merge_id: Optional[str], create: bool, checkout: bool, merge) -
         if os.path.exists(MERGE_HEAD):
             raise CliFail("Git merge in progress, cannot create merge request")
 
-        # Make sure it's a merge request
+        # Make sure it's a merge commit
         if len(commit.parents) < 2:
             raise CliFail("Cannot create merge request from non merge commit")
 
@@ -327,6 +320,15 @@ def approve(ctx, merge_id: Optional[str], create: bool, checkout: bool, merge) -
         create_request(commit, branch)
         push_approvals()
         click.echo(f"Merge request created: {get_merge_id(commit)}")
+
+        # If the commit is on the target branch, pop it
+        if commit == repo.resolve(branch)[0]:
+            cmd(
+                "git",
+                "update-ref",
+                f"refs/heads/{branch}",
+                commit.parents[0].hash.hex(),
+            )
     elif merge:
         if not merge_id:
             raise CliFail("--merge requires MERGE_ID")

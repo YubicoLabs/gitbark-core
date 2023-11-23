@@ -12,37 +12,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from gitbark.git import Commit
-from gitbark.rule import CommitRule, BranchRule, RuleViolation
-from gitbark.util import cmd
+from gitbark.git import Commit, is_descendant
+from gitbark.rule import CommitRule, RefRule, RuleViolation
 from gitbark.project import Cache
 from gitbark.cli.util import click_prompt
 
 import click
 
 
-def is_descendant(prev: Commit, new: Commit) -> bool:
-    """Checks that the current tip is a descendant of the old tip"""
-
-    _, exit_status = cmd(
-        "git",
-        "merge-base",
-        "--is-ancestor",
-        prev.hash.hex(),
-        new.hash.hex(),
-        check=False,
-    )
-
-    return exit_status == 0
-
-
-class RequireFastForward(BranchRule):
+class RequireFastForward(RefRule):
     """Prevents force pushing (non-linear history)."""
 
-    def validate(self, commit: Commit, branch: str):
-        prev_head, _ = self.repo.resolve(branch)
+    def validate(self, commit: Commit, ref: str):
+        prev_head, _ = self.repo.resolve(ref)
         if not is_descendant(prev_head, commit):
-            raise RuleViolation(f"Commit is not a descendant of {prev_head.hash.hex()}")
+            raise RuleViolation(f"Commit is not a descendant of {prev_head}")
 
     @staticmethod
     def setup():
