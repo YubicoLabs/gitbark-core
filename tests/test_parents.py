@@ -1,5 +1,5 @@
 from gitbark.git import Repository
-from gitbark.objects import BranchRuleData, BarkRules
+from gitbark.objects import BarkRules
 from gitbark.core import BARK_RULES_BRANCH
 from gitbark.util import cmd
 
@@ -25,12 +25,12 @@ def repo_parents_dump(
 
     bootstrap_main = repo.head
 
-    branch_rule = BranchRuleData(
-        pattern="main",
-        bootstrap=bootstrap_main.hash.hex(),
-        rules=["require_fast_forward"],
-    )
-    bark_rules = BarkRules(branches=[branch_rule])
+    branch_rule = {
+        "bootstrap": bootstrap_main.hash.hex(),
+        "refs": [{"pattern": "refs/heads/main", "rules": ["require_fast_forward"]}],
+    }
+
+    bark_rules = BarkRules([], project=[branch_rule])
 
     with on_branch(repo, BARK_RULES_BRANCH, True):
         write_bark_rules(repo, bark_rules, module_path)
