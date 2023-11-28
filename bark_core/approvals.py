@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from gitbark.git import Commit
-from gitbark.rule import BranchRule, RuleViolation
+from gitbark.git import Commit, is_descendant
+from gitbark.rule import RefRule, RuleViolation
 from gitbark.util import cmd
 from gitbark.cli.util import CliFail, click_prompt
 
@@ -75,17 +75,10 @@ def list_approvals(references: dict[str, Commit], branch: str) -> dict[str, list
 
 def create_request(commit: Commit, target_branch: str):
     """Takes a merge commit and moves it to a special approval ref"""
-    # TODO: Assert target_branch currently points to commit
     ref_base = approval_ref_base(commit, target_branch)
     ref = f"{ref_base}{get_author_id()}"
     # Create the new ref
     cmd("git", "update-ref", ref, commit.hash.hex())
-    # Reset the old one
-    cmd(
-        "git", "update-ref", f"refs/heads/{target_branch}", commit.parents[0].hash.hex()
-    )
-    cmd("git", "reset", "--hard")
-    # TODO: commit needs to be verified!
 
 
 def add_approval(
@@ -155,8 +148,8 @@ def is_merging(commit: Commit) -> bool:
     return True
 
 
-class RequireApproval(BranchRule):
-    """Requires commits on the branch to be *Approved*.
+class RequireApproval(RefRule):
+    """Requires commits on the ref to be *Approved*.
 
     An *Approved* commit is a merge commit comprising a previous commit from the target
     ref, followed by one or more *Approval* commits. All its approval commits must have
@@ -174,7 +167,7 @@ class RequireApproval(BranchRule):
         self.authors = set(args["authorized_authors"])
         self.threshold = int(args["threshold"])
 
-    def validate(self, commit: Commit, branch: str):
+    def validate(self, commit: Commit, ref: str):
         # Must be a merge commit
         if len(commit.parents) < 2:
             raise RuleViolation("Not an approved merge commit")
@@ -182,7 +175,7 @@ class RequireApproval(BranchRule):
         # Might be a normal merge that we'll want to create a request for
         if is_merging(commit):
             raise RuleViolation(
-                "Merge must be approved. Run 'bark approve --create' "
+                "Merge must be approved. Run 'bark approvals create' "
                 "to create a merge request."
             )
 
@@ -234,38 +227,7 @@ class RequireApproval(BranchRule):
         }
 
 
-@click.command()
-@click.pass_context
-@click.argument("merge_id", required=False)
-@click.option(
-    "--create",
-    is_flag=True,
-    default=False,
-    help="Create a merge request from a merge commit.",
-)
-@click.option(
-    "--checkout",
-    is_flag=True,
-    default=False,
-    help="Checkout the request in a detached state.",
-)
-@click.option(
-    "--merge",
-    is_flag=True,
-    default=False,
-    help="Finalize a merge request by merging it to the target branch.",
-)
-def approve(ctx, merge_id: Optional[str], create: bool, checkout: bool, merge) -> None:
-    """Approve a merge request.
-
-    This will create an approval for creating a merge commit on a branch, which
-    is stored under `refs/approvals/<target_branch>/<merge_id>/`.
-
-    \b
-    MERGE_ID the merge request ID to approve
-    """
-
-    project = ctx.obj["project"]
+def get_approval_context(project, merge_id):
     repo = project.repo
 
     branch = repo.branch
@@ -284,6 +246,32 @@ def approve(ctx, merge_id: Optional[str], create: bool, checkout: bool, merge) -
     fetch_approvals()
     requests = list_approvals(repo.references, branch)
 
+    return branch, merge_id, requests
+
+
+@click.group()
+def approvals():
+    """Manage approvals."""
+
+
+@approvals.command()
+@click.pass_context
+@click.argument("merge_id", required=False)
+def approve(ctx, merge_id: Optional[str]) -> None:
+    """Approve a merge request.
+
+    This will create an approval for creating a merge commit on a branch, which
+    is stored under `refs/approvals/<target_branch>/<merge_id>/`.
+
+    \b
+    MERGE_ID the merge request ID to approve
+    """
+
+    project = ctx.obj["project"]
+    repo = project.repo
+
+    branch, merge_id, requests = get_approval_context(project, merge_id)
+
     if merge_id:
         matched = [a for a in requests if a.startswith(merge_id)]
         if len(matched) > 1:
@@ -292,50 +280,6 @@ def approve(ctx, merge_id: Optional[str], create: bool, checkout: bool, merge) -
             raise CliFail("Merge request not found")
         merge_id = matched[0]
 
-    if checkout:
-        # Check out the merge tree for testing
-        if not merge_id:
-            raise CliFail("--checkout requires MERGE_ID")
-        cmd("git", "checkout", requests[merge_id][0])
-    elif create:
-        # Create a new merge request from a merge commit
-        if merge_id:
-            raise CliFail("--create should not be called with a MERGE_ID")
-
-        # Use HEAD by default
-        commit = repo.head
-
-        # Failed verify may contain merge commit
-        if os.path.exists(FAIL_HEAD):
-            with open(FAIL_HEAD) as f:
-                fail_hash = bytes.fromhex(f.read())
-            fail_commit = Commit(fail_hash, repo)
-            if is_merging(fail_commit):
-                # Clean up merge in progress, we already have the completed commit
-                cmd("git", "merge", "--abort")
-                commit = fail_commit
-
-        # TODO: Check for "dirty"
-        if os.path.exists(MERGE_HEAD):
-            raise CliFail("Git merge in progress, cannot create merge request")
-
-        # Make sure it's a merge request
-        if len(commit.parents) < 2:
-            raise CliFail("Cannot create merge request from non merge commit")
-
-        click.echo("Creating merge request...")
-        create_request(commit, branch)
-        push_approvals()
-        click.echo(f"Merge request created: {get_merge_id(commit)}")
-    elif merge:
-        if not merge_id:
-            raise CliFail("--merge requires MERGE_ID")
-        c_id = cmd("git", "show-ref", requests[merge_id][0])[0].split()[0]
-        commit = Commit(bytes.fromhex(c_id), repo)
-        click.echo("Finalizing merge request...")
-        create_merge(commit, branch, repo.references)
-        click.echo("Merge request completed")
-    elif merge_id:
         # Approve a request
         # TODO: Prevent multiple approvals by same author
         c_id = cmd("git", "show-ref", requests[merge_id][0])[0].split()[0]
@@ -346,9 +290,131 @@ def approve(ctx, merge_id: Optional[str], create: bool, checkout: bool, merge) -
         push_approvals()
         click.echo("Merge request approved")
     else:
-        # List requests
-        click.echo("Available merge requests:")
-        # TODO: How do we know how many approvals are needed?
-        for m_id in requests:
-            n_approvals = len(requests[m_id])
-            click.echo(f"{m_id} ({n_approvals}/? approvals)")
+        raise CliFail("Merge request not found")
+
+
+@approvals.command()
+@click.pass_context
+@click.argument("merge_id", required=False)
+def merge(ctx, merge_id: Optional[str]):
+    """Finalize a merge request by merging it to the target branch.
+
+    \b
+    MERGE_ID the merge request ID to merge
+    """
+
+    project = ctx.obj["project"]
+    repo = project.repo
+
+    branch, merge_id, requests = get_approval_context(project, merge_id)
+
+    if merge_id:
+        matched = [a for a in requests if a.startswith(merge_id)]
+        if len(matched) > 1:
+            raise CliFail("MERGE_ID matches multiple requests")
+        elif len(matched) == 0:
+            raise CliFail("Merge request not found")
+        merge_id = matched[0]
+
+        c_id = cmd("git", "show-ref", requests[merge_id][0])[0].split()[0]
+        commit = Commit(bytes.fromhex(c_id), repo)
+        click.echo("Finalizing merge request...")
+        create_merge(commit, branch, repo.references)
+        click.echo("Merge request completed")
+    else:
+        raise CliFail("Merge request not found")
+
+
+@approvals.command()
+@click.pass_context
+def create(ctx):
+    """Create a merge request from a merge commit."""
+
+    project = ctx.obj["project"]
+    repo = project.repo
+
+    branch = repo.branch
+
+    # Use HEAD by default
+    commit = repo.head
+
+    # Failed verify may contain merge commit
+    if os.path.exists(FAIL_HEAD):
+        with open(FAIL_HEAD) as f:
+            fail_hash = bytes.fromhex(f.read())
+        fail_commit = Commit(fail_hash, repo)
+        if is_merging(fail_commit):
+            # Clean up merge in progress, we already have the completed commit
+            cmd("git", "merge", "--abort")
+            commit = fail_commit
+
+    # TODO: Check for "dirty"
+    if os.path.exists(MERGE_HEAD):
+        raise CliFail("Git merge in progress, cannot create merge request")
+
+    # Make sure it's a merge request
+    if len(commit.parents) < 2:
+        raise CliFail("Cannot create merge request from non merge commit")
+
+    click.echo("Creating merge request...")
+    create_request(commit, branch)
+    push_approvals()
+    click.echo(f"Merge request created: {get_merge_id(commit)}")
+
+
+@approvals.command()
+@click.pass_context
+@click.argument("merge_id")
+def checkout(ctx, merge_id: str) -> None:
+    """Checkout a merge request in a detached state.
+
+    \b
+    MERGE_ID the merge request ID to chekout
+    """
+
+    project = ctx.obj["project"]
+
+    _, _, requests = get_approval_context(project, merge_id)
+
+    cmd("git", "checkout", requests[merge_id][0])
+
+
+@approvals.command(name="list")
+@click.pass_context
+def list_merge_requests(ctx):
+    """List merge requests on branch."""
+
+    project = ctx.obj["project"]
+
+    _, _, requests = get_approval_context(project, None)
+
+    # List requests
+    click.echo("Available merge requests:")
+    # TODO: How do we know how many approvals are needed?
+    for m_id in requests:
+        n_approvals = len(requests[m_id])
+        click.echo(f"{m_id} ({n_approvals}/? approvals)")
+
+
+@approvals.command()
+@click.pass_context
+def clean(ctx):
+    """Delete approval refs.
+
+    This will delete any approval refs that are included in a
+    finalized merge.
+    """
+
+    project = ctx.obj["project"]
+    repo = project.repo
+
+    branch = repo.branch
+    if not branch:
+        raise CliFail("Target branch must be checked out")
+
+    head = repo.head
+    requests = list_approvals(repo.references, branch)
+    for approvals in requests.values():
+        if all(is_descendant(repo.references[a], head) for a in approvals):
+            for a in approvals:
+                cmd("git", "update-ref", "-d", a)

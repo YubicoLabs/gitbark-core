@@ -1,7 +1,8 @@
 import pytest
 import os
 
-from gitbark.objects import BranchRuleData, BarkRules
+from gitbark.objects import BarkRules
+from gitbark.project import Project
 from gitbark.core import BARK_RULES_BRANCH
 from gitbark.git import Repository
 from gitbark.util import cmd
@@ -30,10 +31,11 @@ def repo_installed_dump(
 
     bootstrap_main = repo.head
 
-    branch_rule = BranchRuleData(
-        pattern="main", bootstrap=bootstrap_main.hash.hex(), rules=[]
-    )
-    bark_rules = BarkRules(branches=[branch_rule])
+    branch_rule = {
+        "bootstrap": bootstrap_main.hash.hex(),
+        "refs": [{"pattern": "refs/heads/main"}],
+    }
+    bark_rules = BarkRules([], project=[branch_rule])
 
     with on_branch(repo, BARK_RULES_BRANCH, True):
         write_bark_rules(repo, bark_rules, module_path)
@@ -41,6 +43,9 @@ def repo_installed_dump(
 
     with on_dir(repo._path):
         bark_cli("install", input="y")
+
+    project = Project(repo._path)
+    project.install_modules(module_path.encode())
 
     dump_path = tmp_path_factory.mktemp("dump")
     dump(repo, dump_path)

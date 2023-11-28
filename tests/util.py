@@ -34,7 +34,7 @@ class Key:
         gpg_input += f"Name-Real: {name}\n"
         gpg_input += f"Name-Email: {email}\n"
         gpg_input += f"Expire-Date: {expire_date}\n"
-        gpg_input += "%no-protection"  # No passphrase
+        gpg_input += "%no-protection\n"  # No passphrase
 
         gpg_command = ["gpg", "--batch", "--generate-key", "--status-fd", "1"]
 
