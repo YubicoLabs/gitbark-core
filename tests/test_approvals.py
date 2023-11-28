@@ -180,12 +180,12 @@ def test_merge_request(repo_merge_request: Repository, bark_cli):
     pre_head = repo_merge_request.head
 
     approve_merge_request(repo_merge_request, m_id, APPROVER_2, bark_cli)
+    requests = list_approvals(repo_merge_request.references, repo_merge_request.branch)
+    approval_commits = [repo_merge_request.resolve(ref)[0] for ref in requests[m_id]]
     with on_dir(repo_merge_request._path):
         bark_cli("approvals", "merge", m_id)
 
     octo_merge = repo_merge_request.head
-    requests = list_approvals(repo_merge_request.references, repo_merge_request.branch)
-    approval_commits = [repo_merge_request.resolve(ref)[0] for ref in requests[m_id]]
 
     # The new head should point to something else
     assert pre_head != repo_merge_request.head
@@ -194,18 +194,6 @@ def test_merge_request(repo_merge_request: Repository, bark_cli):
     for a in approval_commits:
         assert a in octo_merge.parents
 
-
-def test_clean_approvals(repo_merge_request: Repository, bark_cli):
+    # Assert approvals are cleaned up after merge
     requests = list_approvals(repo_merge_request.references, repo_merge_request.branch)
-    m_id = list(requests.keys())[0]
-
-    approve_merge_request(repo_merge_request, m_id, APPROVER_2, bark_cli)
-    with on_dir(repo_merge_request._path):
-        bark_cli("approvals", "merge", m_id)
-
-    with on_dir(repo_merge_request._path):
-        bark_cli("approvals", "clean")
-
-    requests = list_approvals(repo_merge_request.references, repo_merge_request.branch)
-
     assert m_id not in requests

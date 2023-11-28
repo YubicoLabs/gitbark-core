@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from gitbark.git import Commit, is_descendant
+from gitbark.git import Commit, Repository, is_descendant
 from gitbark.rule import RefRule, RuleViolation
 from gitbark.util import cmd
 from gitbark.cli.util import CliFail, click_prompt
@@ -129,7 +129,7 @@ def create_merge(
     c_id = cmd("git", "rev-parse", "HEAD")[0]
     cmd("git", "update-ref", f"refs/heads/{target_branch}", c_id)
     cmd("git", "checkout", target_branch)  # Restore prev HEAD
-    # TODO: Delete approvals
+    clean_approvals(commit.repo, get_merge_id(commit))
 
 
 def is_merging(commit: Commit) -> bool:
@@ -146,6 +146,26 @@ def is_merging(commit: Commit) -> bool:
     if commit.tree_hash.hex() != tree_hash:
         return False
     return True
+
+
+def clean_approvals(repo: Repository, merge_id: Optional[str] = None) -> None:
+    """Removes approvals if already included in final merge.
+
+    If merge_id is provided, only approvals associated with that id will be removed.
+    """
+    branch = repo.branch
+    head = repo.head
+    requests = list_approvals(repo.references, branch)
+
+    if merge_id:
+        approval_sets = [requests[merge_id]]
+    else:
+        approval_sets = list(requests.values())
+
+    for approvals in approval_sets:
+        if all(is_descendant(repo.references[a], head) for a in approvals):
+            for a in approvals:
+                cmd("git", "update-ref", "-d", a)
 
 
 class RequireApproval(RefRule):
@@ -412,9 +432,4 @@ def clean(ctx):
     if not branch:
         raise CliFail("Target branch must be checked out")
 
-    head = repo.head
-    requests = list_approvals(repo.references, branch)
-    for approvals in requests.values():
-        if all(is_descendant(repo.references[a], head) for a in approvals):
-            for a in approvals:
-                cmd("git", "update-ref", "-d", a)
+    clean_approvals(repo)
