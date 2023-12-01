@@ -196,7 +196,7 @@ pyyaml = "^6.0"
 type = "git"
 url = "https://github.com/YubicoLabs/gitbark.git"
 reference = "main"
-resolved_reference = "dcf70757b27e810a49db009a9f1fc5d955e3d85e"
+resolved_reference = "41efea87a6bceada84a3d15b9006dc544dc5f366"
 
 [[package]]
 name = "iniconfig"

@@ -31,6 +31,7 @@ ORIG_HEAD = os.path.join(".git", "ORIG_HEAD")
 FAIL_HEAD = os.path.join(".git", "bark", "FAIL_HEAD")
 APPROVALS = "refs/approvals/"
 ID_LEN = 16
+COMMIT_INFO_LEN = 75
 
 
 def get_author_id() -> str:
@@ -63,9 +64,11 @@ def push_approvals() -> None:
     pass  # cmd("git", "push", "origin", f"{APPROVALS}*:{APPROVALS}*")
 
 
-def list_approvals(references: dict[str, Commit], branch: str) -> dict[str, list[str]]:
+def list_approvals(
+    references: dict[str, Commit], branch: Optional[str] = None
+) -> dict[str, list[str]]:
     approvals: dict[str, list[str]] = {}
-    base_ref = f"{APPROVALS}{branch}/"
+    base_ref = f"{APPROVALS}{branch}/" if branch else f"{APPROVALS}"
     for ref in references:
         if ref.startswith(base_ref):
             m_id = parse_ref(ref)[1]
@@ -401,19 +404,72 @@ def checkout(ctx, merge_id: str) -> None:
 
 @approvals.command(name="list")
 @click.pass_context
-def list_merge_requests(ctx):
+@click.option(
+    "-a",
+    "--all",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="List all merge requests.",
+)
+def list_merge_requests(ctx, all):
     """List merge requests on branch."""
 
     project = ctx.obj["project"]
+    repo = project.repo
 
-    _, _, requests = get_approval_context(project, None)
+    branch = repo.branch
+    if not all and not branch:
+        raise CliFail("Target branch must be checked out")
 
-    # List requests
-    click.echo("Available merge requests:")
-    # TODO: How do we know how many approvals are needed?
-    for m_id in requests:
-        n_approvals = len(requests[m_id])
-        click.echo(f"{m_id} ({n_approvals}/? approvals)")
+    fetch_approvals()
+    if all:
+        _requests = list_approvals(repo.references)
+    else:
+        _requests = list_approvals(repo.references, branch)
+
+    # map branch to requests
+    branch_to_requests: dict[str, dict[str, list[str]]] = {}
+    for m_id, approvals in _requests.items():
+        branch = parse_ref(approvals[0])[0]
+        branch_to_requests.setdefault(branch, {}).update({m_id: approvals})
+
+    if not branch_to_requests:
+        click.echo("No merge requests found")
+    else:
+
+        for branch, requests in branch_to_requests.items():
+            # List requests on branch
+            click.echo(f"Found {len(requests.keys())} merge request(s) on '{branch}'")
+            format_str = "{0: <{m_id_length}}  {1: <{approvals_length}}  {2}"
+
+            click.echo(
+                format_str.format(
+                    "Merge ID",
+                    "Approvals",
+                    "Commit",
+                    m_id_length=ID_LEN,
+                    approvals_length=9,
+                )
+            )
+
+            # TODO: How do we know how many approvals are needed?
+            for m_id, approvals in requests.items():
+                m_commit, _ = repo.resolve(approvals[0])
+                f_commit = m_commit.parents[1]  # the commit to be merged
+                f_commit_info = str(f_commit)
+                click.echo(
+                    format_str.format(
+                        m_id,
+                        len(approvals),
+                        (f_commit_info[:COMMIT_INFO_LEN] + "..")
+                        if len(f_commit_info) > COMMIT_INFO_LEN
+                        else f_commit_info,
+                        m_id_length=ID_LEN,
+                        approvals_length=9,
+                    )
+                )
+            click.echo()
 
 
 @approvals.command()
