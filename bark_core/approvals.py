@@ -64,16 +64,17 @@ def push_approvals() -> None:
     pass  # cmd("git", "push", "origin", f"{APPROVALS}*:{APPROVALS}*")
 
 
-def list_approvals(
+def list_requests(
     references: dict[str, Commit], branch: Optional[str] = None
-) -> dict[str, list[str]]:
-    approvals: dict[str, list[str]] = {}
+) -> dict[str, dict[str, list[str]]]:
+    """Returns a dictionary that maps branches to merge requests."""
+    branch_to_requests: dict[str, dict[str, list[str]]] = {}
     base_ref = f"{APPROVALS}{branch}/" if branch else f"{APPROVALS}"
     for ref in references:
         if ref.startswith(base_ref):
-            m_id = parse_ref(ref)[1]
-            approvals.setdefault(m_id, []).append(ref)
-    return approvals
+            branch, m_id, _ = parse_ref(ref)
+            branch_to_requests.setdefault(branch, {}).setdefault(m_id, []).append(ref)
+    return branch_to_requests
 
 
 def create_request(commit: Commit, target_branch: str):
@@ -132,7 +133,7 @@ def create_merge(
     c_id = cmd("git", "rev-parse", "HEAD")[0]
     cmd("git", "update-ref", f"refs/heads/{target_branch}", c_id)
     cmd("git", "checkout", target_branch)  # Restore prev HEAD
-    clean_approvals(commit.repo, get_merge_id(commit))
+    clean_approvals(commit.repo, merge_id=get_merge_id(commit))
 
 
 def is_merging(commit: Commit) -> bool:
@@ -151,24 +152,60 @@ def is_merging(commit: Commit) -> bool:
     return True
 
 
-def clean_approvals(repo: Repository, merge_id: Optional[str] = None) -> None:
+def clean_approvals(
+    repo: Repository,
+    merge_id: Optional[str] = None,
+    branch: Optional[str] = None,
+    force: bool = False,
+) -> None:
     """Removes approvals if already included in final merge.
 
     If merge_id is provided, only approvals associated with that id will be removed.
+    If branch is provided, all requests on that branch will be deleted, otherwise all
+    merge requests on all branches will be considered for deletion.
     """
-    branch = repo.branch
-    head = repo.head
-    requests = list_approvals(repo.references, branch)
+    branch_to_requests = list_requests(repo.references)
 
     if merge_id:
-        approval_sets = [requests[merge_id]]
-    else:
-        approval_sets = list(requests.values())
+        matched = False
+        for branch, requests in branch_to_requests.items():
+            if merge_id in requests:
+                branch_to_requests = {branch: {merge_id: requests[merge_id]}}
+                matched = True
+                break
+        if not matched:
+            raise CliFail("Merge request not found")
+    if branch and not merge_id:
+        if branch in branch_to_requests:
+            branch_to_requests = {branch: branch_to_requests[branch]}
 
-    for approvals in approval_sets:
-        if all(is_descendant(repo.references[a], head) for a in approvals):
-            for a in approvals:
-                cmd("git", "update-ref", "-d", a)
+    not_deleted: dict[str, list[str]] = {}
+    for branch, requests in branch_to_requests.items():
+        branch_head = repo.resolve(branch)[0]
+        for m_id, approvals in requests.items():
+            merged = all(
+                is_descendant(repo.references[a], branch_head) for a in approvals
+            )
+            if force or merged:
+                for a in approvals:
+                    cmd("git", "update-ref", "-d", a)
+            else:
+                not_deleted.setdefault(m_id, []).extend(approvals)
+
+    if not_deleted:
+        error_message = ""
+        if merge_id:
+            error_message = (
+                f"Merge request ({merge_id}) is not fully merged. "
+                f"If you are sure you want to delete it use "
+                "'bark approvals clean {merge_id}' -f."
+            )
+        else:
+            error_message = (
+                "Some merge requests are not fully merged. "
+                "If you are sure you want to delete them use 'bark approvals clean -f'."
+            )
+        raise CliFail(error_message)
 
 
 class RequireApproval(RefRule):
@@ -267,9 +304,9 @@ def get_approval_context(project, merge_id):
         merge_id = m_id
 
     fetch_approvals()
-    requests = list_approvals(repo.references, branch)
+    branch_to_requests = list_requests(repo.references, branch)
 
-    return branch, merge_id, requests
+    return branch, merge_id, branch_to_requests.get(branch, {})
 
 
 @click.group()
@@ -412,7 +449,7 @@ def checkout(ctx, merge_id: str) -> None:
     default=False,
     help="List all merge requests.",
 )
-def list_merge_requests(ctx, all):
+def list_merge_requests(ctx, all: bool):
     """List merge requests on branch."""
 
     project = ctx.obj["project"]
@@ -424,15 +461,9 @@ def list_merge_requests(ctx, all):
 
     fetch_approvals()
     if all:
-        _requests = list_approvals(repo.references)
+        branch_to_requests = list_requests(repo.references)
     else:
-        _requests = list_approvals(repo.references, branch)
-
-    # map branch to requests
-    branch_to_requests: dict[str, dict[str, list[str]]] = {}
-    for m_id, approvals in _requests.items():
-        branch = parse_ref(approvals[0])[0]
-        branch_to_requests.setdefault(branch, {}).update({m_id: approvals})
+        branch_to_requests = list_requests(repo.references, branch)
 
     if not branch_to_requests:
         click.echo("No merge requests found")
@@ -462,7 +493,7 @@ def list_merge_requests(ctx, all):
                     format_str.format(
                         m_id,
                         len(approvals),
-                        (f_commit_info[:COMMIT_INFO_LEN] + "..")
+                        (f_commit_info[:COMMIT_INFO_LEN] + "...")
                         if len(f_commit_info) > COMMIT_INFO_LEN
                         else f_commit_info,
                         m_id_length=ID_LEN,
@@ -474,8 +505,25 @@ def list_merge_requests(ctx, all):
 
 @approvals.command()
 @click.pass_context
-def clean(ctx):
-    """Delete approval refs.
+@click.argument("merge_id", required=False)
+@click.option(
+    "-a",
+    "--all",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Delete approval refs on all branches.",
+)
+@click.option(
+    "-f",
+    "--force",
+    is_flag=True,
+    show_default=True,
+    default=False,
+    help="Delete approval refs that have not been merged.",
+)
+def clean(ctx, merge_id: Optional[str], all: bool, force: bool):
+    """Delete approval refs on branch.
 
     This will delete any approval refs that are included in a
     finalized merge.
@@ -485,7 +533,12 @@ def clean(ctx):
     repo = project.repo
 
     branch = repo.branch
-    if not branch:
+    if not all and not branch:
         raise CliFail("Target branch must be checked out")
 
-    clean_approvals(repo)
+    if merge_id:
+        clean_approvals(repo, merge_id=merge_id, force=force)
+    elif all:
+        clean_approvals(repo, force=force)
+    else:
+        clean_approvals(repo, branch=branch, force=force)
