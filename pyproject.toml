@@ -1,0 +1,36 @@
+[tool.poetry]
+name = "bark-core"
+version = "0.1.0"
+description = "Core Bark rules and commands"
+authors = ["Elias Bonnici <elias.bonnici@yubico.com>"]
+license = "APACHE-2.0"
+readme = "README.md"
+packages=[{include = "bark_core"}]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+pgpy = "^0.6.0"
+paramiko = "^3.3.1"
+
+
+[tool.poetry.plugins."bark_commit_rules"]
+require_signature = "bark_core.signatures:RequireSignature"
+require_valid_parents = "bark_core.parents:RequireValidParents"
+max_parents = "bark_core.parents:MaxParents"
+file_not_modified = "bark_core.files:FileNotModified"
+
+[tool.poetry.plugins."bark_ref_rules"]
+require_approval = "bark_core.approvals:RequireApproval"
+require_fast_forward = "bark_core.parents:RequireFastForward"
+
+[tool.poetry.plugins."bark_commands"]
+approvals = "bark_core.approvals:approvals"
+
+[tool.poetry.group.dev.dependencies]
+gitbark = { git = "https://github.com/YubicoLabs/gitbark.git", branch = "main" }
+pytest = "^7.4.3"
+pytest-gitbark = { git = "https://github.com/YubicoLabs/pytest-gitbark.git", branch = "main" }
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
