@@ -143,6 +143,7 @@ def test_commit_trusted(repo_signatures: Repository, alice_pgp_key):
         "-m",
         "Trusted",
         "--allow-empty",
+        "--author='Alice <alice@pgp.com>'",
         f"--gpg-sign={alice_pgp_key.identifier}",
         cwd=repo._path,
     )

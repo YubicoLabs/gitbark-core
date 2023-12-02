@@ -56,7 +56,7 @@ class Pubkey(ABC):
         pass
 
     @abstractmethod
-    def verify_signature(self, signature: bytes, subject: bytes) -> bool:
+    def verify_signature(self, email: str, signature: bytes, subject: bytes) -> bool:
         pass
 
     @classmethod
@@ -98,8 +98,11 @@ class PgpKey(Pubkey):
     def fingerprint(self) -> str:
         return str(self._key.fingerprint)
 
-    def verify_signature(self, signature: bytes, subject: bytes) -> bool:
+    def verify_signature(self, email: str, signature: bytes, subject: bytes) -> bool:
         if self._is_pgp_signature(signature):
+            emails = [u.email for u in self._key.userids]
+            if email not in emails:
+                return False
             signature = PGPSignature.from_blob(signature)
             try:
                 if self._key.verify(subject, signature):
@@ -139,7 +142,8 @@ class SshKey(Pubkey):
     def fingerprint(self) -> str:
         return self._key.fingerprint.split(":")[1]
 
-    def verify_signature(self, signature: bytes, subject: bytes) -> bool:
+    def verify_signature(self, email: str, signature: bytes, subject: bytes) -> bool:
+        # TODO: Verify email
         if self._is_ssh_signature(signature):
             return self._key.verify_ssh_sig(subject, signature)
         return False
@@ -160,9 +164,11 @@ class SshKey(Pubkey):
             return False
 
 
-def verify_signature_bulk(pubkeys: list[Pubkey], signature: Any, subject: Any) -> bool:
+def verify_signature_bulk(
+    pubkeys: list[Pubkey], email: str, signature: Any, subject: Any
+) -> bool:
     for pubkey in pubkeys:
-        if pubkey.verify_signature(signature, subject):
+        if pubkey.verify_signature(email, signature, subject):
             return True
 
     return False
@@ -266,6 +272,7 @@ def add_authorized_keys_interactive(pubkeys: list[str]) -> str:
 
 def require_signature(commit: Commit, authorized_pubkeys: list[Pubkey]):
     signature, commit_object = commit.signature
+    _, email = commit.author
 
     if not signature:
         # No signature
@@ -275,7 +282,7 @@ def require_signature(commit: Commit, authorized_pubkeys: list[Pubkey]):
         # No pubkeys specified
         raise RuleViolation("No public keys registered")
 
-    if not verify_signature_bulk(authorized_pubkeys, signature, commit_object):
+    if not verify_signature_bulk(authorized_pubkeys, email, signature, commit_object):
         raise RuleViolation("Commit was signed by untrusted key")
 
 
