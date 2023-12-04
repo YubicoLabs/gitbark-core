@@ -18,7 +18,7 @@ from gitbark.cli.util import get_root, click_prompt
 from gitbark.util import cmd
 
 from pgpy import PGPKey as _PGPKey, PGPSignature
-from paramiko import PKey
+from paramiko import PKey, Message
 from typing import Any, Union, Optional
 
 from abc import ABC, abstractmethod
@@ -26,6 +26,7 @@ from abc import ABC, abstractmethod
 import warnings
 import os
 import click
+from base64 import b64decode
 
 warnings.filterwarnings("ignore")
 
@@ -89,6 +90,7 @@ class PgpKey(Pubkey):
         super().__init__(pubkey)
         key, _ = _PGPKey.from_blob(pubkey)
         self._key = key
+        self._emails = [u.email for u in self._key.userids]
 
     @property
     def type(self) -> str:
@@ -99,10 +101,9 @@ class PgpKey(Pubkey):
         return str(self._key.fingerprint)
 
     def verify_signature(self, email: str, signature: bytes, subject: bytes) -> bool:
+        if email not in self._emails:
+            return False
         if self._is_pgp_signature(signature):
-            emails = [u.email for u in self._key.userids]
-            if email not in emails:
-                return False
             signature = PGPSignature.from_blob(signature)
             try:
                 if self._key.verify(subject, signature):
@@ -131,7 +132,12 @@ class PgpKey(Pubkey):
 class SshKey(Pubkey):
     def __init__(self, pubkey: bytes) -> None:
         super().__init__(pubkey)
-        key = PKey(data=pubkey)
+        parts = pubkey.decode().split()
+        self._emails = parts[0].split(",")
+        i = 1
+        while not parts[i].startswith("ssh-"):
+            i += 1
+        key = PKey.from_type_string(parts[i], b64decode(parts[i + 1]))
         self._key = key
 
     @property
@@ -143,8 +149,14 @@ class SshKey(Pubkey):
         return self._key.fingerprint.split(":")[1]
 
     def verify_signature(self, email: str, signature: bytes, subject: bytes) -> bool:
-        # TODO: Verify email
+        if email not in self._emails:
+            return False
         if self._is_ssh_signature(signature):
+            parts = signature.split(b"\n")
+            b64 = b"".join(parts[1:-1])
+            data = b64decode(b64)
+            signature = Message(data)
+            # FIXME: This always returns False
             return self._key.verify_ssh_sig(subject, signature)
         return False
 
@@ -155,7 +167,7 @@ class SshKey(Pubkey):
                 pubkey = f.read()
                 return pubkey
         except Exception:
-            raise ValueError(f"Could not parse SSH key with identifier '{identifier}'")
+            raise ValueError(f"Could not parse SSH key from '{identifier}'")
 
     def _is_ssh_signature(self, signature: bytes):
         if b"-----BEGIN SSH SIGNATURE-----" in signature:
@@ -216,6 +228,7 @@ def _add_public_key_to_repo(pubkey: Pubkey, file_name: str) -> None:
     with open(f"{pubkeys_folder}/{file_name}", "wb") as f:
         f.write(bytes(pubkey))
     cmd("git", "add", f"{pubkeys_folder}/{file_name}")
+    print(pubkey)
 
 
 def add_public_keys_interactive() -> None:
@@ -265,7 +278,7 @@ def add_authorized_keys_interactive(pubkeys: list[str]) -> str:
     for pubkey in pubkeys:
         click.echo(" - {0}".format(pubkey))
     authorized_keys = click_prompt(
-        f"\nEnter the set of authorized keys as a regex pattern (e.g. {pubkey[0]})"
+        f"\nEnter the set of authorized keys as a regex pattern (e.g. {pubkey})"
     )
     return authorized_keys
 

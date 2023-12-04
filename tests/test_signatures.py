@@ -51,17 +51,17 @@ def eve_pgp_key(create_gpg_home):
 
 @pytest.fixture(autouse=True, scope="session")
 def alice_ssh_key(create_ssh_home):
-    return Key.create_ssh_key(create_ssh_home, "ed25519", "alice")
+    return Key.create_ssh_key(create_ssh_home, "ed25519", "alice", "alice@ssh.com")
 
 
 @pytest.fixture(autouse=True, scope="session")
 def bob_ssh_key(create_ssh_home):
-    return Key.create_ssh_key(create_ssh_home, "ed25519", "bob")
+    return Key.create_ssh_key(create_ssh_home, "ed25519", "bob", "bob@ssh.com")
 
 
 @pytest.fixture(autouse=True, scope="session")
 def eve_ssh_key(create_ssh_home):
-    return Key.create_ssh_key(create_ssh_home, "ed25519", "eve")
+    return Key.create_ssh_key(create_ssh_home, "ed25519", "eve", "eve@ssh.com")
 
 
 @pytest.fixture(scope="session")
@@ -161,6 +161,13 @@ def test_commit_untrusted_ssh(repo_signatures: Repository, eve_ssh_key):
 def test_commit_trusted_ssh(repo_signatures: Repository, alice_ssh_key):
     configure_ssh(repo_signatures, alice_ssh_key)
     action: Callable[[Repository], None] = lambda repo: cmd(
-        "git", "commit", "-m", "Trusted", "allow_empty", "-S", cwd=repo._path
+        "git",
+        "commit",
+        "-m",
+        "Trusted",
+        "--allow-empty",
+        "--author='Alice <alice@ssh.com>'",
+        "-S",
+        cwd=repo._path,
     )
-    verify_action(repo=repo_signatures, passes=False, action=action)
+    verify_action(repo=repo_signatures, passes=True, action=action)
