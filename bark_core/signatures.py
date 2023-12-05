@@ -20,6 +20,7 @@ from gitbark.util import cmd
 from pgpy import PGPKey as _PGPKey, PGPSignature
 from paramiko import PKey, Message
 from typing import Any, Union, Optional
+from hashlib import sha256, sha512
 
 from abc import ABC, abstractmethod
 
@@ -155,9 +156,29 @@ class SshKey(Pubkey):
             parts = signature.split(b"\n")
             b64 = b"".join(parts[1:-1])
             data = b64decode(b64)
-            signature = Message(data)
-            # FIXME: This always returns False
-            return self._key.verify_ssh_sig(subject, signature)
+
+            signature_msg = Message(data)
+            mp = signature_msg.get_bytes(6)
+            signature_msg.get_int()
+            signature_msg.get_string()
+            ns = signature_msg.get_string()
+            reserved = signature_msg.get_string()
+            alg = signature_msg.get_string()
+            sig = signature_msg.get_string()
+
+            data_msg = Message(b"")
+            data_msg.add_bytes(mp)
+            data_msg.add_string(ns)
+            data_msg.add_string(reserved)  # reserved
+            data_msg.add_string(alg)
+            if alg.decode() == "sha256":
+                data_msg.add_string(sha256(subject).digest())
+            elif alg.decode() == "sha512":
+                data_msg.add_string(sha512(subject).digest())
+            else:
+                return False
+
+            return self._key.verify_ssh_sig(data_msg.asbytes(), Message(sig))
         return False
 
     @classmethod
