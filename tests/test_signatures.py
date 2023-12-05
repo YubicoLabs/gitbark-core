@@ -136,7 +136,21 @@ def test_commit_untrusted_gpg(repo_signatures: Repository, eve_pgp_key):
     verify_action(repo=repo_signatures, passes=False, action=action)
 
 
-def test_commit_trusted(repo_signatures: Repository, alice_pgp_key):
+def test_commit_wrong_email_gpg(repo_signatures: Repository, alice_pgp_key):
+    action: Callable[[Repository], None] = lambda repo: cmd(
+        "git",
+        "commit",
+        "-m",
+        "Untrusted",
+        "--allow-empty",
+        f"--gpg-sign={alice_pgp_key.identifier}",
+        "--author='Eve <eve@pgp.com>'",
+        cwd=repo._path,
+    )
+    verify_action(repo=repo_signatures, passes=False, action=action)
+
+
+def test_commit_trusted_gpg(repo_signatures: Repository, alice_pgp_key):
     action: Callable[[Repository], None] = lambda repo: cmd(
         "git",
         "commit",
@@ -154,6 +168,21 @@ def test_commit_untrusted_ssh(repo_signatures: Repository, eve_ssh_key):
     configure_ssh(repo_signatures, eve_ssh_key)
     action: Callable[[Repository], None] = lambda repo: cmd(
         "git", "commit", "-m", "Untrusted", "--allow-empty", "-S", cwd=repo._path
+    )
+    verify_action(repo=repo_signatures, passes=False, action=action)
+
+
+def test_commit_wrong_email_ssh(repo_signatures: Repository, alice_ssh_key):
+    configure_ssh(repo_signatures, alice_ssh_key)
+    action: Callable[[Repository], None] = lambda repo: cmd(
+        "git",
+        "commit",
+        "-m",
+        "Untrusted",
+        "--allow-empty",
+        "-S",
+        "--author='Eve <eve@ssh.com>'",
+        cwd=repo._path,
     )
     verify_action(repo=repo_signatures, passes=False, action=action)
 
