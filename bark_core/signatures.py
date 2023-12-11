@@ -18,8 +18,14 @@ from gitbark.cli.util import get_root, click_prompt
 from gitbark.util import cmd
 
 from pgpy import PGPKey as _PGPKey, PGPSignature
-from cryptography.exceptions import InvalidSignature
+from cryptography.exceptions import InvalidSignature, UnsupportedAlgorithm
+from cryptography.hazmat.primitives.asymmetric.ec import (
+    EllipticCurvePublicKey,
+    ECDSA,
+    SECP256R1,
+)
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
 from cryptography.hazmat.primitives.serialization import (
     SSHPublicKeyTypes,
@@ -149,7 +155,7 @@ def ssh_put_string(value: bytes) -> bytes:
 
 
 def ssh_verify_signature(
-    key: SSHPublicKeyTypes, payload: bytes, signature_pem: bytes
+    keytype: bytes, key: SSHPublicKeyTypes, payload: bytes, signature_pem: bytes
 ) -> None:
     parts = signature_pem.split(b"\n")
     b64 = b"".join(parts[1:-1])
@@ -164,40 +170,101 @@ def ssh_verify_signature(
     reserved, buf = ssh_get_string(buf)
     hash_algo, buf = ssh_get_string(buf)
     sig_m, buf = ssh_get_string(buf)
+
+    pub_keytype, pk_m = ssh_get_string(pk_m)
+    if pub_keytype != keytype:
+        raise ValueError("Wrong public key type")
+
+    pub_bytes, pk_m = ssh_get_string(pk_m)
+    # TODO: Fail if this doesn't match key
+
+    keytype, sig_m = ssh_get_string(sig_m)
+    signature, sig_m = ssh_get_string(sig_m)
+
     h = SHA512 if hash_algo == b"sha512" else SHA256
     md = Hash(h())
     md.update(payload)
-
+    h_message = md.finalize()
     message = (
         prefix
         + ssh_put_string(namespace)
         + ssh_put_string(reserved)
         + ssh_put_string(hash_algo)
-        + ssh_put_string(md.finalize())
+        + ssh_put_string(h_message)
     )
 
-    keytype, sig_m = ssh_get_string(sig_m)
-    signature, sig_m = ssh_get_string(sig_m)
+    if keytype.startswith(b"sk-"):
+        # Message is embedded into FIDO structure
+        h = SHA256  # Always uses SHA256
+        application, pk_m = ssh_get_string(pk_m)
+        md = Hash(h())
+        md.update(application)
+        app_param = md.finalize()
+        md = Hash(h())
+        md.update(message)
+        client_param = md.finalize()
+        message = (
+            app_param  # h("ssh:")
+            + sig_m  # flags + counter
+            + b""  # extensions
+            + client_param  # h(message)
+        )
 
-    pub_keytype, pk_m = ssh_get_string(pk_m)
-    pub_bytes, pk_m = ssh_get_string(pk_m)
-
-    # TODO: Assert same public key in message
     if isinstance(key, RSAPublicKey):
         key.verify(signature, message, PKCS1v15(), h())
+    elif isinstance(key, EllipticCurvePublicKey):
+        key.verify(signature, message, ECDSA(h()))
     else:
         key.verify(signature, message)
+
+
+_SSH_DSA = b"ssh-dss"
+_SSH_RSA = b"ssh-rsa"
+_SSH_ED25519 = b"ssh-ed25519"
+_ECDSA_NISTP256 = b"ecdsa-sha2-nistp256"
+_ECDSA_NISTP384 = b"ecdsa-sha2-nistp384"
+_ECDSA_NISTP521 = b"ecdsa-sha2-nistp521"
+_SK_SSH_ED25519 = b"sk-ssh-ed25519@openssh.com"
+_SK_ECDSA_NISTP256 = b"sk-ecdsa-sha2-nistp256@openssh.com"
+
+_SUPPORTED_KEYS = (
+    _SSH_DSA,
+    _SSH_RSA,
+    _SSH_ED25519,
+    _ECDSA_NISTP256,
+    _ECDSA_NISTP384,
+    _ECDSA_NISTP521,
+    _SK_SSH_ED25519,
+    _SK_ECDSA_NISTP256,
+)
 
 
 class SshKey(Pubkey):
     def __init__(self, pubkey: bytes) -> None:
         super().__init__(pubkey)
-        parts = pubkey.decode().split()
-        self._emails = parts[0].split(",")
+        parts = pubkey.split()
+        self._emails = parts[0].decode().split(",")
         i = 1
-        while not parts[i].startswith("ssh-"):
+        while not parts[i] in _SUPPORTED_KEYS:
             i += 1
-        self._key = load_ssh_public_key(" ".join(parts[i:]).encode())
+
+        buf = b64decode(parts[i + 1])
+        self._keytype, buf = ssh_get_string(buf)
+        try:
+            self._key = load_ssh_public_key(b" ".join(parts[i:]))
+        except UnsupportedAlgorithm:
+            if self._keytype == _SK_SSH_ED25519:
+                pub_bytes, buf = ssh_get_string(buf)
+                self._key = Ed25519PublicKey.from_public_bytes(pub_bytes)
+            elif self._keytype == _SK_ECDSA_NISTP256:
+                curve, buf = ssh_get_string(buf)
+                pub_bytes, buf = ssh_get_string(buf)
+                self._key = EllipticCurvePublicKey.from_encoded_point(
+                    SECP256R1(), pub_bytes
+                )
+            else:
+                raise
+            application, buf = ssh_get_string(buf)
 
     @property
     def type(self) -> str:
@@ -213,9 +280,9 @@ class SshKey(Pubkey):
             return False
         if self._is_ssh_signature(signature):
             try:
-                ssh_verify_signature(self._key, subject, signature)
+                ssh_verify_signature(self._keytype, self._key, subject, signature)
                 return True
-            except InvalidSignature:
+            except (InvalidSignature, ValueError):
                 return False
         return False
 
