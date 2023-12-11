@@ -19,9 +19,14 @@ from gitbark.util import cmd
 
 from pgpy import PGPKey as _PGPKey, PGPSignature
 from cryptography.exceptions import InvalidSignature
-from cryptography.hazmat.primitives.asymmetric import ed25519
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
+from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
+from cryptography.hazmat.primitives.serialization import (
+    SSHPublicKeyTypes,
+    load_ssh_public_key,
+)
+from cryptography.hazmat.primitives.hashes import Hash, SHA256, SHA512
 from typing import Any, Union, Optional, Tuple
-from hashlib import sha256, sha512
 from base64 import b64decode
 from abc import ABC, abstractmethod
 
@@ -143,7 +148,9 @@ def ssh_put_string(value: bytes) -> bytes:
     return len(value).to_bytes(4, "big") + value
 
 
-def ssh_verify_signature(payload: bytes, signature_pem: bytes) -> bytes:
+def ssh_verify_signature(
+    key: SSHPublicKeyTypes, payload: bytes, signature_pem: bytes
+) -> None:
     parts = signature_pem.split(b"\n")
     b64 = b"".join(parts[1:-1])
     buf = b64decode(b64)
@@ -157,27 +164,29 @@ def ssh_verify_signature(payload: bytes, signature_pem: bytes) -> bytes:
     reserved, buf = ssh_get_string(buf)
     hash_algo, buf = ssh_get_string(buf)
     sig_m, buf = ssh_get_string(buf)
-    h = sha512 if hash_algo == b"sha512" else sha256
+    h = SHA512 if hash_algo == b"sha512" else SHA256
+    md = Hash(h())
+    md.update(payload)
 
     message = (
         prefix
         + ssh_put_string(namespace)
         + ssh_put_string(reserved)
         + ssh_put_string(hash_algo)
-        + ssh_put_string(h(payload).digest())
+        + ssh_put_string(md.finalize())
     )
 
     keytype, sig_m = ssh_get_string(sig_m)
-    assert keytype == b"ssh-ed25519"
     signature, sig_m = ssh_get_string(sig_m)
 
     pub_keytype, pk_m = ssh_get_string(pk_m)
-    assert pub_keytype == keytype
     pub_bytes, pk_m = ssh_get_string(pk_m)
 
-    key = ed25519.Ed25519PublicKey.from_public_bytes(pub_bytes)
-    key.verify(signature, message)
-    return pub_bytes
+    # TODO: Assert same public key in message
+    if isinstance(key, RSAPublicKey):
+        key.verify(signature, message, PKCS1v15(), h())
+    else:
+        key.verify(signature, message)
 
 
 class SshKey(Pubkey):
@@ -188,10 +197,7 @@ class SshKey(Pubkey):
         i = 1
         while not parts[i].startswith("ssh-"):
             i += 1
-        buf = b64decode(parts[i + 1])
-        self._key_type, buf = ssh_get_string(buf)
-        assert parts[i] == self._key_type.decode()
-        self._key_bytes, buf = ssh_get_string(buf)
+        self._key = load_ssh_public_key(" ".join(parts[i:]).encode())
 
     @property
     def type(self) -> str:
@@ -199,16 +205,16 @@ class SshKey(Pubkey):
 
     @property
     def fingerprint(self) -> str:
-        return sha256(self._key_bytes).hexdigest()
+        # TODO: fingerprint
+        return str(self._key)
 
     def verify_signature(self, email: str, signature: bytes, subject: bytes) -> bool:
         if email not in self._emails:
             return False
         if self._is_ssh_signature(signature):
             try:
-                pub_key = ssh_verify_signature(subject, signature)
-                assert self._key_bytes == pub_key
-                return self._key_bytes == pub_key
+                ssh_verify_signature(self._key, subject, signature)
+                return True
             except InvalidSignature:
                 return False
         return False
