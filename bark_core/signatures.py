@@ -18,16 +18,16 @@ from gitbark.cli.util import get_root, click_prompt
 from gitbark.util import cmd
 
 from pgpy import PGPKey as _PGPKey, PGPSignature
-from paramiko import PKey, Message
-from typing import Any, Union, Optional
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric import ed25519
+from typing import Any, Union, Optional, Tuple
 from hashlib import sha256, sha512
-
+from base64 import b64decode
 from abc import ABC, abstractmethod
 
 import warnings
 import os
 import click
-from base64 import b64decode
 
 warnings.filterwarnings("ignore")
 
@@ -130,6 +130,56 @@ class PgpKey(Pubkey):
             return False
 
 
+def ssh_get_int(buf: bytes) -> Tuple[int, bytes]:
+    return int.from_bytes(buf[:4], "big"), buf[4:]
+
+
+def ssh_get_string(buf: bytes) -> Tuple[bytes, bytes]:
+    ln, buf = ssh_get_int(buf)
+    return buf[:ln], buf[ln:]
+
+
+def ssh_put_string(value: bytes) -> bytes:
+    return len(value).to_bytes(4, "big") + value
+
+
+def ssh_verify_signature(payload: bytes, signature_pem: bytes) -> bytes:
+    parts = signature_pem.split(b"\n")
+    b64 = b"".join(parts[1:-1])
+    buf = b64decode(b64)
+
+    prefix, buf = buf[:6], buf[6:]
+    assert prefix == b"SSHSIG"
+    version, buf = ssh_get_int(buf)
+    assert version == 1
+    pk_m, buf = ssh_get_string(buf)
+    namespace, buf = ssh_get_string(buf)
+    reserved, buf = ssh_get_string(buf)
+    hash_algo, buf = ssh_get_string(buf)
+    sig_m, buf = ssh_get_string(buf)
+    h = sha512 if hash_algo == b"sha512" else sha256
+
+    message = (
+        prefix
+        + ssh_put_string(namespace)
+        + ssh_put_string(reserved)
+        + ssh_put_string(hash_algo)
+        + ssh_put_string(h(payload).digest())
+    )
+
+    keytype, sig_m = ssh_get_string(sig_m)
+    assert keytype == b"ssh-ed25519"
+    signature, sig_m = ssh_get_string(sig_m)
+
+    pub_keytype, pk_m = ssh_get_string(pk_m)
+    assert pub_keytype == keytype
+    pub_bytes, pk_m = ssh_get_string(pk_m)
+
+    key = ed25519.Ed25519PublicKey.from_public_bytes(pub_bytes)
+    key.verify(signature, message)
+    return pub_bytes
+
+
 class SshKey(Pubkey):
     def __init__(self, pubkey: bytes) -> None:
         super().__init__(pubkey)
@@ -138,8 +188,10 @@ class SshKey(Pubkey):
         i = 1
         while not parts[i].startswith("ssh-"):
             i += 1
-        key = PKey.from_type_string(parts[i], b64decode(parts[i + 1]))
-        self._key = key
+        buf = b64decode(parts[i + 1])
+        self._key_type, buf = ssh_get_string(buf)
+        assert parts[i] == self._key_type.decode()
+        self._key_bytes, buf = ssh_get_string(buf)
 
     @property
     def type(self) -> str:
@@ -147,38 +199,18 @@ class SshKey(Pubkey):
 
     @property
     def fingerprint(self) -> str:
-        return self._key.fingerprint.split(":")[1]
+        return sha256(self._key_bytes).hexdigest()
 
     def verify_signature(self, email: str, signature: bytes, subject: bytes) -> bool:
         if email not in self._emails:
             return False
         if self._is_ssh_signature(signature):
-            parts = signature.split(b"\n")
-            b64 = b"".join(parts[1:-1])
-            data = b64decode(b64)
-
-            signature_msg = Message(data)
-            mp = signature_msg.get_bytes(6)
-            signature_msg.get_int()
-            signature_msg.get_string()
-            ns = signature_msg.get_string()
-            reserved = signature_msg.get_string()
-            alg = signature_msg.get_string()
-            sig = signature_msg.get_string()
-
-            data_msg = Message(b"")
-            data_msg.add_bytes(mp)
-            data_msg.add_string(ns)
-            data_msg.add_string(reserved)  # reserved
-            data_msg.add_string(alg)
-            if alg.decode() == "sha256":
-                data_msg.add_string(sha256(subject).digest())
-            elif alg.decode() == "sha512":
-                data_msg.add_string(sha512(subject).digest())
-            else:
+            try:
+                pub_key = ssh_verify_signature(subject, signature)
+                assert self._key_bytes == pub_key
+                return self._key_bytes == pub_key
+            except InvalidSignature:
                 return False
-
-            return self._key.verify_ssh_sig(data_msg.asbytes(), Message(sig))
         return False
 
     @classmethod
