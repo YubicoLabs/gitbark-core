@@ -27,6 +27,7 @@ from cryptography.hazmat.primitives.asymmetric.ec import (
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
+from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from cryptography.hazmat.primitives.serialization import (
     SSHPublicKeyTypes,
     load_ssh_public_key,
@@ -213,6 +214,11 @@ def ssh_verify_signature(
     if isinstance(key, RSAPublicKey):
         key.verify(signature, message, PKCS1v15(), h())
     elif isinstance(key, EllipticCurvePublicKey):
+        r, signature = ssh_get_string(signature)
+        s, signature = ssh_get_string(signature)
+        signature = encode_dss_signature(
+            int.from_bytes(r, "big"), int.from_bytes(s, "big")
+        )
         key.verify(signature, message, ECDSA(h()))
     else:
         key.verify(signature, message)
