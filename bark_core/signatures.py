@@ -178,6 +178,9 @@ def ssh_verify_signature(
 
     # TODO: Check remaining pk_m to ensure it matches key
     assert pk_m
+    pub_key, pk_m = ssh_get_string(pk_m)
+    if b"ecdsa" in pub_keytype:
+        curve, pk_m = ssh_get_string(pk_m)
 
     sign_keytype, sig_m = ssh_get_string(sig_m)
     signature, sig_m = ssh_get_string(sig_m)
