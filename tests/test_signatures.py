@@ -2,7 +2,6 @@ from gitbark.git import Repository
 from gitbark.util import cmd
 
 from pytest_gitbark.util import (
-    verify_rules,
     verify_action,
     on_dir,
     write_commit_rules,
@@ -16,6 +15,18 @@ from typing import Callable
 import pytest
 import shutil
 import os
+
+_SSH_KEYS = [
+    {"type": "rsa", "size": 1024},
+    {"type": "rsa", "size": 2048},
+    {"type": "rsa", "size": 3072},
+    {"type": "rsa", "size": 4096},
+    {"type": "ecdsa", "size": 256},
+    {"type": "ecdsa", "size": 384},
+    {"type": "ecdsa", "size": 521},
+    {"type": "ed25519"},
+    {"type": "dsa"},
+]
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -49,19 +60,35 @@ def eve_pgp_key(create_gpg_home):
     return Key.create_pgp_key("RSA", "1024", "Eve PGP", "eve@pgp.com")
 
 
+def idfn(fixture_value):
+    id = fixture_value["type"]
+    if "size" in fixture_value:
+        id = id + str(fixture_value["size"])
+    return id
+
+
+@pytest.fixture(autouse=True, scope="session", params=_SSH_KEYS, ids=idfn)
+def alice_ssh_key_parameterized(create_ssh_home, request):
+    key_type = request.param["type"]
+    size = request.param.get("size", None)
+    return Key.create_ssh_key(
+        create_ssh_home, key_type, size, f"alice-{key_type}-{size}", "alice@ssh.com"
+    )
+
+
 @pytest.fixture(autouse=True, scope="session")
 def alice_ssh_key(create_ssh_home):
-    return Key.create_ssh_key(create_ssh_home, "ed25519", "alice", "alice@ssh.com")
+    return Key.create_ssh_key(create_ssh_home, "rsa", 1024, "alice", "alice@ssh.com")
 
 
 @pytest.fixture(autouse=True, scope="session")
 def bob_ssh_key(create_ssh_home):
-    return Key.create_ssh_key(create_ssh_home, "ed25519", "bob", "bob@ssh.com")
+    return Key.create_ssh_key(create_ssh_home, "rsa", 1024, "bob", "bob@ssh.com")
 
 
 @pytest.fixture(autouse=True, scope="session")
 def eve_ssh_key(create_ssh_home):
-    return Key.create_ssh_key(create_ssh_home, "ed25519", "eve", "eve@ssh.com")
+    return Key.create_ssh_key(create_ssh_home, "rsa", 1024, "eve", "eve@ssh.com")
 
 
 @pytest.fixture(scope="session")
@@ -71,6 +98,7 @@ def repo_signatures_dump(
     alice_pgp_key: Key,
     bob_pgp_key: Key,
     alice_ssh_key: Key,
+    alice_ssh_key_parameterized: Key,
     bob_ssh_key: Key,
 ):
     repo, dump_path = repo_installed_dump
@@ -80,6 +108,7 @@ def repo_signatures_dump(
         alice_pgp_key.add_to_repo("alice.asc")
         bob_pgp_key.add_to_repo("bob.asc")
         alice_ssh_key.add_to_repo("alice.pub")
+        alice_ssh_key_parameterized.add_to_repo("alice_parameterized.pub")
         bob_ssh_key.add_to_repo("bob.pub")
 
     cmd("git", "add", ".", cwd=repo._path)
@@ -88,7 +117,13 @@ def repo_signatures_dump(
         "rules": [
             {
                 "require_signature": {
-                    "authorized_keys": ["alice.asc", "bob.asc", "alice.pub", "bob.pub"]
+                    "authorized_keys": [
+                        "alice.asc",
+                        "bob.asc",
+                        "alice.pub",
+                        "alice_parameterized.pub",
+                        "bob.pub",
+                    ]
                 }
             }
         ]
@@ -187,8 +222,8 @@ def test_commit_wrong_email_ssh(repo_signatures: Repository, alice_ssh_key):
     verify_action(repo=repo_signatures, passes=False, action=action)
 
 
-def test_commit_trusted_ssh(repo_signatures: Repository, alice_ssh_key):
-    configure_ssh(repo_signatures, alice_ssh_key)
+def test_commit_trusted_ssh(repo_signatures: Repository, alice_ssh_key_parameterized):
+    configure_ssh(repo_signatures, alice_ssh_key_parameterized)
     action: Callable[[Repository], None] = lambda repo: cmd(
         "git",
         "commit",

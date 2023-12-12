@@ -26,13 +26,14 @@ from cryptography.hazmat.primitives.asymmetric.ec import (
 )
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+from cryptography.hazmat.primitives.asymmetric.dsa import DSAPublicKey
 from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from cryptography.hazmat.primitives.serialization import (
     SSHPublicKeyTypes,
     load_ssh_public_key,
 )
-from cryptography.hazmat.primitives.hashes import Hash, SHA256, SHA512
+from cryptography.hazmat.primitives.hashes import Hash, SHA1, SHA256, SHA512
 from typing import Any, Union, Optional, Tuple
 from base64 import b64decode
 from abc import ABC, abstractmethod
@@ -213,6 +214,8 @@ def ssh_verify_signature(
             + b""  # extensions
             + client_param  # h(message)
         )
+    elif sign_keytype == _SSH_DSA:
+        h = SHA1
     else:
         # TODO: Do this more robustly
         h = SHA256 if b"256" in sign_keytype else SHA512
@@ -226,6 +229,8 @@ def ssh_verify_signature(
             int.from_bytes(r, "big"), int.from_bytes(s, "big")
         )
         key.verify(signature, message, ECDSA(h()))
+    elif isinstance(key, DSAPublicKey):
+        key.verify(signature, message, h())
     else:
         key.verify(signature, message)
 

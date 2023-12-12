@@ -68,10 +68,28 @@ class Key:
 
     @classmethod
     def create_ssh_key(
-        cls, ssh_dir: str, key_type: str, file_name: str, email: str
+        cls,
+        ssh_dir: str,
+        key_type: str,
+        size: Optional[int],
+        file_name: str,
+        email: str,
     ) -> "Key":
         ssh_key_path = f"{ssh_dir}/{file_name}"
-        cmd("ssh-keygen", "-t", key_type, "-N", "", "-f", ssh_key_path)
+        if size:
+            cmd(
+                "ssh-keygen",
+                "-t",
+                key_type,
+                "-b",
+                str(size),
+                "-N",
+                "",
+                "-f",
+                ssh_key_path,
+            )
+        else:
+            cmd("ssh-keygen", "-t", key_type, "-N", "", "-f", ssh_key_path)
         ssh_pub_path = f"{ssh_key_path}.pub"
         # prepend the email
         with open(ssh_pub_path) as f:
