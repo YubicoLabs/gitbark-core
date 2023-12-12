@@ -176,10 +176,10 @@ def ssh_verify_signature(
     if pub_keytype != keytype:
         raise ValueError("Wrong public key type")
 
-    pub_bytes, pk_m = ssh_get_string(pk_m)
-    # TODO: Fail if this doesn't match key
+    # TODO: Check remaining pk_m to ensure it matches key
+    assert pk_m
 
-    keytype, sig_m = ssh_get_string(sig_m)
+    sign_keytype, sig_m = ssh_get_string(sig_m)
     signature, sig_m = ssh_get_string(sig_m)
 
     h = SHA512 if hash_algo == b"sha512" else SHA256
@@ -194,7 +194,7 @@ def ssh_verify_signature(
         + ssh_put_string(h_message)
     )
 
-    if keytype.startswith(b"sk-"):
+    if sign_keytype.startswith(b"sk-"):
         # Message is embedded into FIDO structure
         h = SHA256  # Always uses SHA256
         application, pk_m = ssh_get_string(pk_m)
@@ -210,6 +210,9 @@ def ssh_verify_signature(
             + b""  # extensions
             + client_param  # h(message)
         )
+    else:
+        # TODO: Do this more robustly
+        h = SHA256 if b"256" in sign_keytype else SHA512
 
     if isinstance(key, RSAPublicKey):
         key.verify(signature, message, PKCS1v15(), h())
