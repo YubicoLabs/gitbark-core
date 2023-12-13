@@ -223,6 +223,7 @@ def ssh_verify_signature(
     if isinstance(key, RSAPublicKey):
         key.verify(signature, message, PKCS1v15(), h())
     elif isinstance(key, EllipticCurvePublicKey):
+        # R and S encoded as bytestrings
         r, signature = ssh_get_string(signature)
         s, signature = ssh_get_string(signature)
         signature = encode_dss_signature(
@@ -230,6 +231,11 @@ def ssh_verify_signature(
         )
         key.verify(signature, message, ECDSA(h()))
     elif isinstance(key, DSAPublicKey):
+        # R and S encoded as 20 bytes each
+        r, s = signature[:20], signature[20:]
+        signature = encode_dss_signature(
+            int.from_bytes(r, "big"), int.from_bytes(s, "big")
+        )
         key.verify(signature, message, h())
     else:
         key.verify(signature, message)
