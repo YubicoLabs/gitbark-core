@@ -23,16 +23,19 @@ from cryptography.hazmat.primitives.asymmetric.ec import (
     EllipticCurvePublicKey,
     ECDSA,
     SECP256R1,
+    SECP384R1,
+    SECP521R1,
 )
-from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey
+from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicKey, RSAPublicNumbers
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
-from cryptography.hazmat.primitives.asymmetric.dsa import DSAPublicKey
+from cryptography.hazmat.primitives.asymmetric.dsa import (
+    DSAPublicKey,
+    DSAParameterNumbers,
+    DSAPublicNumbers,
+)
 from cryptography.hazmat.primitives.asymmetric.padding import PKCS1v15
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
-from cryptography.hazmat.primitives.serialization import (
-    SSHPublicKeyTypes,
-    load_ssh_public_key,
-)
+from cryptography.hazmat.primitives.serialization import SSHPublicKeyTypes
 from cryptography.hazmat.primitives.hashes import Hash, SHA1, SHA256, SHA384, SHA512
 from typing import Any, Union, Optional, Tuple
 from base64 import b64decode
@@ -158,6 +161,11 @@ def ssh_get_string(buf: bytes) -> Tuple[bytes, bytes]:
     return buf[:ln], buf[ln:]
 
 
+def ssh_get_bigint(buf: bytes) -> Tuple[int, bytes]:
+    value, rest = ssh_get_string(buf)
+    return int.from_bytes(value, "big"), rest
+
+
 def ssh_put_string(value: bytes) -> bytes:
     return len(value).to_bytes(4, "big") + value
 
@@ -183,6 +191,14 @@ _SUPPORTED_KEYS = (
     _SK_ECDSA_NISTP256,
 )
 
+_ECDSA_CURVES = {
+    _ECDSA_NISTP256: SECP256R1,
+    _ECDSA_NISTP384: SECP384R1,
+    _ECDSA_NISTP521: SECP521R1,
+    _SK_ECDSA_NISTP256: SECP256R1,
+}
+
+
 # Hashes
 
 _H_MESSAGE = {
@@ -207,9 +223,7 @@ _H_DSA = {
 }
 
 
-def ssh_verify_signature(
-    keytype: bytes, key: SSHPublicKeyTypes, payload: bytes, signature_pem: bytes
-) -> None:
+def ssh_verify_signature(keydata: bytes, payload: bytes, signature_pem: bytes) -> None:
     parts = signature_pem.split(b"\n")
     b64 = b"".join(parts[1:-1])
     buf = b64decode(b64)
@@ -224,15 +238,8 @@ def ssh_verify_signature(
     hash_algo, buf = ssh_get_string(buf)
     sig_m, buf = ssh_get_string(buf)
 
-    pub_keytype, pk_m = ssh_get_string(pk_m)
-    if pub_keytype != keytype:
-        raise ValueError("Wrong public key type")
-
-    # TODO: Check remaining pk_m to ensure it matches key
-    assert pk_m
-    pub_key, pk_m = ssh_get_string(pk_m)
-    if pub_keytype in _H_ECDSA:
-        curve, pk_m = ssh_get_string(pk_m)
+    if keydata != pk_m:
+        raise ValueError("Public key mismatch")
 
     sign_keytype, sig_m = ssh_get_string(sig_m)
     signature, sig_m = ssh_get_string(sig_m)
@@ -247,6 +254,8 @@ def ssh_verify_signature(
         + ssh_put_string(hash_algo)
         + ssh_put_string(h_message)
     )
+
+    key, pk_m = load_ssh_key(pk_m)
 
     if sign_keytype.startswith(b"sk-"):
         # Message is embedded into FIDO structure
@@ -265,27 +274,47 @@ def ssh_verify_signature(
         )
 
     if isinstance(key, RSAPublicKey):
-        h = _H_RSA[sign_keytype]
-        key.verify(signature, message, PKCS1v15(), h())
+        key.verify(signature, message, PKCS1v15(), _H_RSA[sign_keytype]())
     elif isinstance(key, EllipticCurvePublicKey):
-        h = _H_ECDSA[sign_keytype]
-        # R and S encoded as bytestrings
-        r, signature = ssh_get_string(signature)
-        s, signature = ssh_get_string(signature)
-        signature = encode_dss_signature(
-            int.from_bytes(r, "big"), int.from_bytes(s, "big")
-        )
-        key.verify(signature, message, ECDSA(h()))
+        # R and S encoded in SSH format
+        r, signature = ssh_get_bigint(signature)
+        s, signature = ssh_get_bigint(signature)
+        signature = encode_dss_signature(r, s)
+        key.verify(signature, message, ECDSA(_H_ECDSA[sign_keytype]()))
     elif isinstance(key, DSAPublicKey):
-        h = _H_DSA[sign_keytype]
-        # R and S encoded as 20 bytes each
-        r, s = signature[:20], signature[20:]
-        signature = encode_dss_signature(
-            int.from_bytes(r, "big"), int.from_bytes(s, "big")
-        )
-        key.verify(signature, message, h())
+        # R and S encoded as 20 byte integers
+        r = int.from_bytes(signature[:20], "big")
+        s = int.from_bytes(signature[20:], "big")
+        signature = encode_dss_signature(r, s)
+        key.verify(signature, message, _H_DSA[sign_keytype]())
     else:
         key.verify(signature, message)
+
+
+def load_ssh_key(data: bytes) -> Tuple[SSHPublicKeyTypes, bytes]:
+    keytype, data = ssh_get_string(data)
+    if keytype == _SSH_RSA:
+        e, data = ssh_get_bigint(data)
+        n, data = ssh_get_bigint(data)
+        return RSAPublicNumbers(e, n).public_key(), data
+    if keytype in _ECDSA_CURVES:
+        curve, data = ssh_get_string(data)
+        point, data = ssh_get_string(data)
+        return (
+            EllipticCurvePublicKey.from_encoded_point(_ECDSA_CURVES[keytype](), point),
+            data,
+        )
+    if keytype in (_SSH_ED25519, _SK_SSH_ED25519):
+        pub_bytes, data = ssh_get_string(data)
+        return Ed25519PublicKey.from_public_bytes(pub_bytes), data
+    if keytype == _SSH_DSA:
+        p, data = ssh_get_bigint(data)
+        q, data = ssh_get_bigint(data)
+        g, data = ssh_get_bigint(data)
+        y, data = ssh_get_bigint(data)
+        pn = DSAParameterNumbers(p, q, g)
+        return DSAPublicNumbers(y, pn).public_key(), data
+    raise UnsupportedAlgorithm()
 
 
 class SshKey(Pubkey):
@@ -297,23 +326,7 @@ class SshKey(Pubkey):
         while not parts[i] in _SUPPORTED_KEYS:
             i += 1
 
-        buf = b64decode(parts[i + 1])
-        self._keytype, buf = ssh_get_string(buf)
-        try:
-            self._key = load_ssh_public_key(b" ".join(parts[i:]))
-        except UnsupportedAlgorithm:
-            if self._keytype == _SK_SSH_ED25519:
-                pub_bytes, buf = ssh_get_string(buf)
-                self._key = Ed25519PublicKey.from_public_bytes(pub_bytes)
-            elif self._keytype == _SK_ECDSA_NISTP256:
-                curve, buf = ssh_get_string(buf)
-                pub_bytes, buf = ssh_get_string(buf)
-                self._key = EllipticCurvePublicKey.from_encoded_point(
-                    SECP256R1(), pub_bytes
-                )
-            else:
-                raise
-            application, buf = ssh_get_string(buf)
+        self._key = b64decode(parts[i + 1])
 
     @property
     def type(self) -> str:
@@ -329,7 +342,7 @@ class SshKey(Pubkey):
             return False
         if self._is_ssh_signature(signature):
             try:
-                ssh_verify_signature(self._keytype, self._key, subject, signature)
+                ssh_verify_signature(self._key, subject, signature)
                 return True
             except (InvalidSignature, ValueError):
                 return False
