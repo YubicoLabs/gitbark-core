@@ -6,6 +6,8 @@ from bark_core.signatures import _add_public_key_to_repo, Pubkey
 from typing import Union, Optional
 import subprocess
 import re
+import random
+import string
 
 
 class Key:
@@ -106,3 +108,7 @@ def configure_ssh(repo: Repository, key: Key):
     cmd("git", "config", "gpg.format", "ssh", cwd=repo._path)
     cmd("git", "config", "user.email", key.email, cwd=repo._path)
     cmd("git", "config", "user.signingkey", key.identifier, cwd=repo._path)
+
+
+def random_string(k: int = 5):
+    return "".join(random.choices(string.ascii_uppercase + string.digits, k=k))
