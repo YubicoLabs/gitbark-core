@@ -38,7 +38,7 @@ from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 from cryptography.hazmat.primitives.serialization import SSHPublicKeyTypes
 from cryptography.hazmat.primitives.hashes import Hash, SHA1, SHA256, SHA384, SHA512
 from typing import Any, Union, Optional, Tuple
-from base64 import b64decode
+from base64 import b64decode, b64encode
 from abc import ABC, abstractmethod
 
 import warnings
@@ -334,8 +334,9 @@ class SshKey(Pubkey):
 
     @property
     def fingerprint(self) -> str:
-        # TODO: fingerprint
-        return str(self._key)
+        md = Hash(SHA256())
+        md.update(self._key)
+        return b64encode(md.finalize()).decode().rstrip("=")
 
     def verify_signature(self, email: str, signature: bytes, subject: bytes) -> bool:
         if email not in self._emails:
