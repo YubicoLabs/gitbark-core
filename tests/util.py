@@ -3,18 +3,29 @@ from gitbark.git import Repository
 
 from bark_core.signatures import _add_public_key_to_repo, Pubkey
 
-from typing import Union
+from typing import Union, Optional
 import subprocess
 import re
 
 
 class Key:
-    def __init__(self, identifier: str) -> None:
+    def __init__(self, identifier: str, is_ssh: bool = False) -> None:
         self.identifier = identifier
+        self.is_ssh = is_ssh
 
     @property
     def pubkey(self) -> Pubkey:
+        if self.is_ssh:
+            return Pubkey.from_identifier(self.identifier + ".pub")
         return Pubkey.from_identifier(self.identifier)
+
+    @property
+    def email(self) -> str:
+        if not self.is_ssh:
+            raise Exception("Not an SSH key")
+        with open(self.identifier + ".pub") as f:
+            email, _ = f.read().split(" ", 1)
+        return email
 
     @classmethod
     def create_pgp_key(
@@ -56,10 +67,36 @@ class Key:
         return cls(fingerprint)
 
     @classmethod
-    def create_ssh_key(cls, ssh_dir: str, key_type: str, file_name: str) -> "Key":
+    def create_ssh_key(
+        cls,
+        ssh_dir: str,
+        key_type: str,
+        size: Optional[int],
+        file_name: str,
+        email: str,
+    ) -> "Key":
         ssh_key_path = f"{ssh_dir}/{file_name}"
-        cmd("ssh-keygen", "-t", key_type, "-N", "", "-f", ssh_key_path)
-        return cls(f"{ssh_key_path}.pub")
+        if size:
+            cmd(
+                "ssh-keygen",
+                "-t",
+                key_type,
+                "-b",
+                str(size),
+                "-N",
+                "",
+                "-f",
+                ssh_key_path,
+            )
+        else:
+            cmd("ssh-keygen", "-t", key_type, "-N", "", "-f", ssh_key_path)
+        ssh_pub_path = f"{ssh_key_path}.pub"
+        # prepend the email
+        with open(ssh_pub_path) as f:
+            pub = f.read()
+        with open(ssh_pub_path, "w") as f:
+            f.write(f"{email} {pub}")
+        return cls(ssh_key_path, True)
 
     def add_to_repo(self, file_name: str) -> None:
         _add_public_key_to_repo(self.pubkey, file_name)
@@ -67,4 +104,5 @@ class Key:
 
 def configure_ssh(repo: Repository, key: Key):
     cmd("git", "config", "gpg.format", "ssh", cwd=repo._path)
+    cmd("git", "config", "user.email", key.email, cwd=repo._path)
     cmd("git", "config", "user.signingkey", key.identifier, cwd=repo._path)
