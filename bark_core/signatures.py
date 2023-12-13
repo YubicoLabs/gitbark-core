@@ -33,7 +33,7 @@ from cryptography.hazmat.primitives.serialization import (
     SSHPublicKeyTypes,
     load_ssh_public_key,
 )
-from cryptography.hazmat.primitives.hashes import Hash, SHA1, SHA256, SHA512
+from cryptography.hazmat.primitives.hashes import Hash, SHA1, SHA256, SHA384, SHA512
 from typing import Any, Union, Optional, Tuple
 from base64 import b64decode
 from abc import ABC, abstractmethod
@@ -99,6 +99,9 @@ class Pubkey(ABC):
         raise ValueError("Unsupported key type")
 
 
+# OpenPGP
+
+
 class PgpKey(Pubkey):
     def __init__(self, pubkey: bytes) -> None:
         super().__init__(pubkey)
@@ -143,6 +146,9 @@ class PgpKey(Pubkey):
             return False
 
 
+# SSH
+
+
 def ssh_get_int(buf: bytes) -> Tuple[int, bytes]:
     return int.from_bytes(buf[:4], "big"), buf[4:]
 
@@ -154,6 +160,51 @@ def ssh_get_string(buf: bytes) -> Tuple[bytes, bytes]:
 
 def ssh_put_string(value: bytes) -> bytes:
     return len(value).to_bytes(4, "big") + value
+
+
+# Public key types
+_SSH_DSA = b"ssh-dss"
+_SSH_RSA = b"ssh-rsa"
+_SSH_ED25519 = b"ssh-ed25519"
+_ECDSA_NISTP256 = b"ecdsa-sha2-nistp256"
+_ECDSA_NISTP384 = b"ecdsa-sha2-nistp384"
+_ECDSA_NISTP521 = b"ecdsa-sha2-nistp521"
+_SK_SSH_ED25519 = b"sk-ssh-ed25519@openssh.com"
+_SK_ECDSA_NISTP256 = b"sk-ecdsa-sha2-nistp256@openssh.com"
+
+_SUPPORTED_KEYS = (
+    _SSH_DSA,
+    _SSH_RSA,
+    _SSH_ED25519,
+    _ECDSA_NISTP256,
+    _ECDSA_NISTP384,
+    _ECDSA_NISTP521,
+    _SK_SSH_ED25519,
+    _SK_ECDSA_NISTP256,
+)
+
+# Hashes
+
+_H_MESSAGE = {
+    b"sha256": SHA256,
+    b"sha512": SHA512,
+}
+
+_H_RSA = {
+    b"rsa-sha2-256": SHA256,
+    b"rsa-sha2-512": SHA512,
+}
+
+_H_ECDSA = {
+    _ECDSA_NISTP256: SHA256,
+    _ECDSA_NISTP384: SHA384,
+    _ECDSA_NISTP521: SHA512,
+    _SK_ECDSA_NISTP256: SHA256,
+}
+
+_H_DSA = {
+    _SSH_DSA: SHA1,
+}
 
 
 def ssh_verify_signature(
@@ -180,14 +231,13 @@ def ssh_verify_signature(
     # TODO: Check remaining pk_m to ensure it matches key
     assert pk_m
     pub_key, pk_m = ssh_get_string(pk_m)
-    if b"ecdsa" in pub_keytype:
+    if pub_keytype in _H_ECDSA:
         curve, pk_m = ssh_get_string(pk_m)
 
     sign_keytype, sig_m = ssh_get_string(sig_m)
     signature, sig_m = ssh_get_string(sig_m)
 
-    h = SHA512 if hash_algo == b"sha512" else SHA256
-    md = Hash(h())
+    md = Hash(_H_MESSAGE[hash_algo]())
     md.update(payload)
     h_message = md.finalize()
     message = (
@@ -200,29 +250,25 @@ def ssh_verify_signature(
 
     if sign_keytype.startswith(b"sk-"):
         # Message is embedded into FIDO structure
-        h = SHA256  # Always uses SHA256
         application, pk_m = ssh_get_string(pk_m)
-        md = Hash(h())
+        md = Hash(SHA256())
         md.update(application)
         app_param = md.finalize()
-        md = Hash(h())
+        md = Hash(SHA256())
         md.update(message)
         client_param = md.finalize()
         message = (
-            app_param  # h("ssh:")
+            app_param  # sha256("ssh:")
             + sig_m  # flags + counter
             + b""  # extensions
-            + client_param  # h(message)
+            + client_param  # sha256(message)
         )
-    elif sign_keytype == _SSH_DSA:
-        h = SHA1
-    else:
-        # TODO: Do this more robustly
-        h = SHA256 if b"256" in sign_keytype else SHA512
 
     if isinstance(key, RSAPublicKey):
+        h = _H_RSA[sign_keytype]
         key.verify(signature, message, PKCS1v15(), h())
     elif isinstance(key, EllipticCurvePublicKey):
+        h = _H_ECDSA[sign_keytype]
         # R and S encoded as bytestrings
         r, signature = ssh_get_string(signature)
         s, signature = ssh_get_string(signature)
@@ -231,6 +277,7 @@ def ssh_verify_signature(
         )
         key.verify(signature, message, ECDSA(h()))
     elif isinstance(key, DSAPublicKey):
+        h = _H_DSA[sign_keytype]
         # R and S encoded as 20 bytes each
         r, s = signature[:20], signature[20:]
         signature = encode_dss_signature(
@@ -239,27 +286,6 @@ def ssh_verify_signature(
         key.verify(signature, message, h())
     else:
         key.verify(signature, message)
-
-
-_SSH_DSA = b"ssh-dss"
-_SSH_RSA = b"ssh-rsa"
-_SSH_ED25519 = b"ssh-ed25519"
-_ECDSA_NISTP256 = b"ecdsa-sha2-nistp256"
-_ECDSA_NISTP384 = b"ecdsa-sha2-nistp384"
-_ECDSA_NISTP521 = b"ecdsa-sha2-nistp521"
-_SK_SSH_ED25519 = b"sk-ssh-ed25519@openssh.com"
-_SK_ECDSA_NISTP256 = b"sk-ecdsa-sha2-nistp256@openssh.com"
-
-_SUPPORTED_KEYS = (
-    _SSH_DSA,
-    _SSH_RSA,
-    _SSH_ED25519,
-    _ECDSA_NISTP256,
-    _ECDSA_NISTP384,
-    _ECDSA_NISTP521,
-    _SK_SSH_ED25519,
-    _SK_ECDSA_NISTP256,
-)
 
 
 class SshKey(Pubkey):
