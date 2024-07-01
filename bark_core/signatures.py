@@ -322,7 +322,7 @@ class SshKey(Pubkey):
         super().__init__(pubkey)
         parts = pubkey.split()
         self._emails = parts[0].decode().split(",")
-        i = 1
+        i = 0
         while not parts[i] in _SUPPORTED_KEYS:
             i += 1
 
