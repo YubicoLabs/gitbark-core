@@ -352,6 +352,8 @@ class SshKey(Pubkey):
     @classmethod
     def _load_blob(cls, identifier: str) -> bytes:
         try:
+            # expanduser to catch relative paths like ~/.ssh/key.pub
+            identifier = os.path.expanduser(identifier)
             with open(identifier, "rb") as f:
                 pubkey = f.read()
                 return pubkey
