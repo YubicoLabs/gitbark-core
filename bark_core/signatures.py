@@ -321,7 +321,7 @@ class SshKey(Pubkey):
     def __init__(self, pubkey: bytes) -> None:
         super().__init__(pubkey)
         parts = pubkey.split()
-        self._emails = parts[0].decode().split(",")
+        self._emails = parts[2].decode().split(",")
         i = 0
         while not parts[i] in _SUPPORTED_KEYS:
             i += 1
