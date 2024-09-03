@@ -387,18 +387,15 @@ def get_authorized_pubkeys(
 
 def get_pubkey_from_git() -> Optional[Pubkey]:
     identifier = cmd("git", "config", "user.signingKey", check=False)[0]
-    gpg_format = cmd("git", "config", "gpg.format", check=False)[0]
-    # check if signingKey is ssh
-    if gpg_format and gpg_format == "ssh":
-        email = cmd("git", "config", "user.email", check=False)[0]
-        identifier = os.path.expanduser(identifier) # expand path if relative
-        with open(identifier, 'r') as file: # read public key
-            pubkey = file.read()
-        pubkey_tmp = f"{email} {pubkey}" # join email & pubkey to create correct format
-        identifier = "/tmp/pubkey" # point to tmp dir
-        with open(identifier, "w") as file: # write tmp pubkey with correct format
-            file.write(pubkey_tmp)
     if identifier:
+        gpg_format = cmd("git", "config", "gpg.format", check=False)[0]
+        # check if signingKey is ssh
+        if gpg_format and gpg_format == "ssh":
+            email = cmd("git", "config", "user.email", check=False)[0]
+            identifier = os.path.expanduser(identifier) # expand path if relative
+            with open(identifier, 'r') as file: # read public key
+                pubkey = file.read()
+                return SshKey(f"{email} ".encode() + pubkey.encode())
         return Pubkey.from_identifier(identifier)
     return None
 
@@ -451,8 +448,6 @@ def add_public_keys_interactive() -> None:
             file_name = click_prompt(prompt="Enter the name for the public key")
             _add_public_key_to_repo(p_key, file_name)
             pubkeys.add(p_key)
-            # remove temporary ssh key if exists
-            os.remove("/tmp/pubkey") if os.path.exists("/tmp/pubkey") else None
 
     while True:
         if len(pubkeys) == 0:
