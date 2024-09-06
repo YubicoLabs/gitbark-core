@@ -395,7 +395,7 @@ def get_pubkey_from_git() -> Optional[Pubkey]:
             identifier = os.path.expanduser(identifier) # expand path if relative
             with open(identifier, 'rb') as file: # read public key
                 pubkey = file.read()
-                return SshKey(f"{email} ".encode() + pubkey.encode())
+                return SshKey(f"{email} ".encode() + pubkey)
         return Pubkey.from_identifier(identifier)
     return None
 
