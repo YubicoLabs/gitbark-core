@@ -393,7 +393,7 @@ def get_pubkey_from_git() -> Optional[Pubkey]:
         if gpg_format and gpg_format == "ssh":
             email = cmd("git", "config", "user.email", check=False)[0]
             identifier = os.path.expanduser(identifier) # expand path if relative
-            with open(identifier, 'r') as file: # read public key
+            with open(identifier, 'rb') as file: # read public key
                 pubkey = file.read()
                 return SshKey(f"{email} ".encode() + pubkey.encode())
         return Pubkey.from_identifier(identifier)
