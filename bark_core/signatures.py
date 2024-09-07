@@ -352,6 +352,8 @@ class SshKey(Pubkey):
     @classmethod
     def _load_blob(cls, identifier: str) -> bytes:
         try:
+            # expanduser to catch relative paths like ~/.ssh/key.pub
+            identifier = os.path.expanduser(identifier)
             with open(identifier, "rb") as f:
                 pubkey = f.read()
                 return pubkey
@@ -386,6 +388,14 @@ def get_authorized_pubkeys(
 def get_pubkey_from_git() -> Optional[Pubkey]:
     identifier = cmd("git", "config", "user.signingKey", check=False)[0]
     if identifier:
+        gpg_format = cmd("git", "config", "gpg.format", check=False)[0]
+        # check if signingKey is ssh
+        if gpg_format and gpg_format == "ssh":
+            email = cmd("git", "config", "user.email", check=False)[0]
+            identifier = os.path.expanduser(identifier) # expand path if relative
+            with open(identifier, 'rb') as file: # read public key
+                pubkey = file.read()
+                return SshKey(f"{email} ".encode() + pubkey)
         return Pubkey.from_identifier(identifier)
     return None
 
