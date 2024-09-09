@@ -1,0 +1,179 @@
+== GitBark Core
+A collection of useful rules and subcommands for use in link:https://github.com/YubicoLabs/gitbark[GitBark].
+
+=== Usage
+To use this package in GitBark include the package reference in the `requirements.txt` file, that should be located in the `bark_rules` branch (for more information see link:https://github.com/YubicoLabs/gitbark/blob/main/doc/Overview.adoc#bark-modules[here]). Below is an example:
+
+----
+# requirements.txt
+git+https://github.com/YubicoLabs/gitbark-core.git
+----
+
+The module can also be added interactively using the `bark add-modules` command.
+
+
+=== Commit Rules
+
+==== `require_signature`
+
+This rule mandates that a commit must be signed by a specific key, supporting both SSH and OpenPGP keys, including Security Keys.
+
+The authorized keys are defined as one or a list of glob patterns matching the specific public key files, which should be checked into the repository and reside in `/.bark/.pubkeys/`.
+
+Here is an example configuration of this rule in the `commit_rules.yaml` file:
+
+[source, yaml]
+----
+rules:
+- require_signature:
+    authorized_keys: [Alice.pub, Bob.pub]
+----
+In this configuration, only commits signed with Alice's or Bob's key are considered authorized.
+
+==== `file_not_modified`
+
+This rule prevents modification to specific files.
+
+The set of files that should remain unmodified is defined as one or more glob patterns.
+
+An example configuration of this rule in the `commit_rules.yaml` file is shown below:
+
+[source, yaml]
+----
+rules:
+- file_not_modified:
+    pattern: sensitive.json
+----
+
+To achieve file-level authorization one can combine this rule with `require_signature` using the `any` clause (for more information on the `any` clause see link:https://github.com/YubicoLabs/gitbark/blob/main/doc/Overview.adoc#specification[here]).
+
+Here is an example of that configuration:
+
+[source, yaml]
+----
+rules:
+- any:
+    - file_not_modified:
+        pattern: sensitive.json
+    - require_signature:
+        authorized_keys: Alice.pub
+----
+In this configuration the two rules are evaluated using OR logic, meaning that at least one of them need to be satisfied. The resulting behavior stipulates that `sensitive.json` cannot be modified unless the commit is signed by Alice.
+
+==== `max_parents`
+This rule requires a commit to have a maximum number of parents.
+
+An example configuration of this rule in the `commit_rules.yaml` file is shown below:
+
+[source, yaml]
+----
+rules:
+- max_parents:
+    threshold: 1
+----
+In this configuration, the rule mandates that a commit can have a maximum of one parent.
+
+
+==== `require_valid_parents`
+By default, not all commits are required to be valid in GitBark. The framework validates a commit against the rules defined in its nearest **valid** ancestor commits. This means that between the ancestor and the commit being validated there can exist non-valid commits.
+
+Using `require_valid_parents` rule you can reuire ALL parents of a commit to be valid, as seen below:
+
+[source, yaml]
+----
+rules:
+- require_valid_parents:
+----
+
+Optionally, you can allow non-valid parents as long as their commit hashes are included in the commit message (this makes allowing them more explicit, which prevent accidental inclusion). To accomplish this, use the `allow_explicit` parameter, as illustrated below:
+
+[source, yaml]
+----
+rules:
+- require_valid_parents:
+    allow_explicit: True
+----
+
+=== Ref Rules
+
+==== `require_approval`
+This rule requires commits on specific references to be **Approved** by a predetermined number of people.
+
+An **Approved** commit is a merge commit comprising a previous commit from the target ref, followed by one or more **Approval** commits. All its approval commits must have the same tree hash as the approved commit, and must include the approved commits initial parent in their set of parents. All approval commits must also have the same set of parents, and must be valid according to their commit rules.
+
+Essentially, an approval commit is a "normal" merge commit, with additional approvals being copies of the first approval, but with different authors (and possible messages). The *approved* commit is then an octo-merge commit containing the merge target, and all approval commits.
+
+To configure this rule, you must define the set of authorized approvers (as a list of email addresses) and the approval threshold.
+
+An example configuration of this rule in the `bark_rules.yaml` file is shown below:
+
+[source, yaml]
+----
+project:
+- bootstrap: 80a177b2b7fc39b4dd664fcda0cd185457fbaaeb
+  refs:
+  - pattern: refs/heads/main
+    rules:
+    - require_approval:
+        threshold: 2
+        authorized_authors:
+        - alice@test.com
+        - bob@test.com
+----
+This configuration requires the HEAD commit on `refs/heads/main` to be **Approved** by Alice and Bob.
+
+==== `require_fast_forward`
+This rule requires changes on specific references to be fast-forward only (i.e. no force pushing, linear history).
+
+An example configuration of this rule is shown below:
+
+[source, yaml]
+----
+project:
+- bootstrap: 80a177b2b7fc39b4dd664fcda0cd185457fbaaeb
+  refs:
+  - pattern: refs/heads/main
+    rules:
+    - require_fast_forward:
+----
+This configuration prevents non-fast-forward changes on `refs/heads/main`.
+
+
+=== Subcommands
+
+==== `bark approvals create`
+This subcommand is used to create a **Merge Request** from a merge commit. The command takes an existing merge commit and moves it to a special approval ref, allowing for subsequent approvals.
+
+A **Merge Request** functions similarly to a pull request. It represents a commit that encapsulates the changes the original author intends to merge into the target branch.
+
+If you are running `GitBark` with link:https://github.com/YubicoLabs/gitbark/blob/main/doc/Overview.adoc#git-hooks[hooks] and using the `require_approval` rule, any attempt to merge a branch that has not been **Approved** will fail. In such cases, `GitBark` will prompt you to run `bark approvals create` (as seen below), using the failing merge commit as source for the **Merge Request**.
+
+----
+$ git merge --no-ff feat
+Merge made by the 'ort' strategy.
+Merge must be approved. Run 'bark approvals create' to create a merge request.
+fatal: ref updates aborted by hook
+
+$ bark approvals create
+Creating merge request...
+Merge request created: dd3687ef49085ba3
+----
+
+==== `bark approvals approve`
+To approve a **Merge Request**, use the `bark approvals approve` command. This command creates an **Approval** commit, which is a merge commit combining the previous commit from the target reference and the HEAD commit of the branch to be merged. All approval commits must share the same tree hash and be valid according to their commit rules.
+
+
+==== `bark approvals merge`
+When a **Merge Request** has received sufficient approvals, you can finalize it using the `bark approvals merge` command. This will create an **Approved** commit, which is an octo-merge commit that includes the merge target and all the approval commits.
+
+
+==== `bark approvals list`
+This command lists the available merge requests.
+
+==== `bark approvals checkout`
+This command performs a `git checkout` on the **Merge Request** commit.
+
+
+==== `bark approvals clean`
+All approvals and merge requests are pointed to by references. These references can be deleted using the `bark approvals clean` command. Note that references associated to a specific merge request will be automatically deleted once a merge request is finalized.
+
